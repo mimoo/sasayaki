@@ -1,10 +1,23 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 
 	"golang.org/x/crypto/ssh/terminal"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -20,6 +33,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	// Initialization
 	keyPair, err := initSasayaki(string(passphrase))
 	if err != nil {
@@ -28,18 +42,53 @@ func main() {
 
 	fmt.Println(keyPair)
 
-	// Load contacts ~/.sasayaki/contacts/
-	// as a json file?
-	// {
-	// 	{
-	// 		"name": "david",
-	// 		"pubkey": "...",
-	// 		"verified": [...]
-	// 	}
-	// }
-	// or better, sqlite3 file! but every row needs to be encrypted with our key
+	// Contacts
+	// - id
+	// - publickey: of the account
+	// - date: metadata
+	// - name: hector
+	//
+	// Verifications
+	// - id
+	// - publickey: of the verified account
+	// - who: publickey of verifier
+	// - date: metadata
+	// - how: via facebook
+	// - name: hector
+	// - signature: signature from "who" over "'verification' | date | publickey | len_name | name | len_how | how"
+	//
+	// Conversations
+	// - id: we can have different convos with the same person (like email)
+	// - date_creation: metadata
+	// - date_last_message: metadata
+	// - publickey: of the account
+	// - sessionkey: state after the last message
+	//
+	// Messages
+	// - id
+	// - conversation_id
+	// - date: metadata
+	// - sender: me or him
+	// - message: actual content
 
-	// Load old messages ~/.sasayaki/messages/
+	location := filepath.Join(sasayakiFolder(), "database.db")
+	db, err := sql.Open("sqlite3", location)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Close()
+
+	createStatement := `
+	CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT);
+	CREATE TABLE IF NOT EXISTS verifications (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, who TEXT, date TIMESTAMP, how TEXT, name TEXT, signature TEXT);
+	CREATE TABLE IF NOT EXISTS conversations (id INTEGER PRIMARY KEY AUTOINCREMENT, date_creation TIMESTAMP, date_last_message TIMESTAMP, publickey TEXT, sessionkey TEXT);
+	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER, date TIMESTAMP, sender TEXT, message TEXT);
+	`
+	_, err = db.Exec(createStatement)
+	if err != nil {
+		log.Printf("%q: %s\n", err, createStatement)
+		return
+	}
 
 	// Create server at 127.0.0.1:nextOpenPort
 	// -> open that url with default browser
@@ -47,7 +96,109 @@ func main() {
 	// -> serve a one-page js that removes the authToken and stores it in
 	// -> display the full url+token in the terminal?
 	//    -> bad idea since it will be daemon later?
+	// -> use websockets for messages? (if I want to emulate email I can just use websocket as push notification)
+	var token [16]byte
+	_, err = rand.Read(token[:])
+	if err != nil {
+		panic(err)
+	}
 
-	// Connect to the server and check new messages
+	http.HandleFunc("/", handler)
+	url := fmt.Sprintf("http://localhost:7373/?token=%s", base64.StdEncoding.EncodeToString(token[:]))
+	go func() {
+		panic(http.ListenAndServe("localhost:7373", nil))
+	}()
 
+	// open on browser
+	fmt.Println("interface listening on", url)
+	openbrowser(url)
+
+	//
+	//
+	// connect to the Sasayaki "hub?" server
+	// I think this should be done using TLS + gRPC instead
+	//
+	// /get_new_messages (sorted)
+	//
+	// -> [
+	// 	{convo_id: "random_guid", message: "E(date|content, AD=to+from)", from: "publickey"},
+	// 	{...},
+	// 	{...},
+	// ]
+	//
+	// /start_conversation
+	//
+	// (we trust the date received)
+	//
+	// POST convo_id: "random_guid", to: "publickey", message: "E(date|content, AD=to+from)"
+
+	//
+	//
+	// PUSH NOTIFICATIONS
+	//
+
+	roots := x509.NewCertPool()
+	ok := roots.AppendCertsFromPEM([]byte(rootPEM))
+	if !ok {
+		panic("sasayaki: failed to parse root certificate")
+	}
+
+	conn, err := tls.Dial("tcp", "localhost:7474", &tls.Config{
+		// Avoids most of the memorably-named TLS attacks
+		MinVersion: tls.VersionTLS12,
+		// Only use curves which have constant-time implementations
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP256,
+		},
+		RootCAs: roots,
+	})
+	if err != nil {
+		panic("failed to connect: " + err.Error())
+	}
+	fmt.Println("connected to the Sasayaki Hub")
+	defer conn.Close()
+
+	// send our publickey
+	conn.Write([]byte(keyPair.ExportPublicKey()))
+
+	// receive push notifications
+	var buffer [1]byte
+	for {
+		_, err := conn.Read(buffer[:])
+		if err != io.EOF {
+			fmt.Println("sasayaki: server closed the connection")
+			break
+		} else if err != nil {
+			panic(err)
+		}
+
+		switch buffer[0] {
+		case 0:
+			fmt.Println("sasayaki: new contact request")
+		case 1:
+			fmt.Println("sasayaki: new conversation")
+		case 2:
+			fmt.Println("sasayaki: new message")
+		default:
+			fmt.Println("sasayaki: notification message not understood")
+		}
+	}
+
+	//
+	fmt.Println("Bye bye!")
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
+}
+
+func openbrowser(url string) {
+	switch runtime.GOOS {
+	case "linux":
+		exec.Command("xdg-open", url).Start()
+	case "windows":
+		exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		exec.Command("open", url).Start()
+	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -18,13 +19,15 @@ func initSasayaki(passphrase string) (keyPair *disco.KeyPair, err error) {
 
 // init ~/.sasayaki folder
 func initSasayakiFolder() {
+	home := sasayakiFolder()
 	// create ~/.sasayaki if it doesn't exists
-	if _, err := os.Stat(sasayakiFolder()); os.IsNotExist(err) {
-		os.MkdirAll(sasayakiFolder(), 0770) // user | group | all
+	if _, err := os.Stat(home); os.IsNotExist(err) {
+		os.MkdirAll(home, 0770) // user | group | all
 	}
 	// create ~/.sasayaki/keys if it doesn't exists
-	keyFolder := sasayakiFolder() + "/keys"
+	keyFolder := filepath.Join(home, "keys")
 	if _, err := os.Stat(keyFolder); os.IsNotExist(err) {
+		fmt.Println("sasayaki: creating configuration folder at", home)
 		os.MkdirAll(keyFolder, 0770) // user | group | all
 	}
 }
@@ -32,9 +35,10 @@ func initSasayakiFolder() {
 // init keypair
 func initKeyPair(passphrase string) (*disco.KeyPair, error) {
 	// location
-	location := sasayakiFolder() + "/keys/keypair"
+	location := filepath.Join(sasayakiFolder(), "/keys/keypair")
 	// create ~/.sasayaki/keys/keyPair
 	if _, err := os.Stat(location); os.IsNotExist(err) {
+		fmt.Println("sasayaki: generating a keypair for new user")
 		return disco.GenerateAndSaveDiscoKeyPair(location, passphrase)
 	} else { // if it already exists, load it
 		keyPair, err := disco.LoadDiscoKeyPair(location, passphrase)
@@ -51,7 +55,7 @@ func sasayakiFolder() string {
 	if runtime.GOOS == "windows" {
 		// what about using the previous home and doing this instead?
 		// return filepath.Join(home, "AppData", "Roaming", "Sasayaki")
-		home = os.Getenv("HOMEDRIVE") + os.Getenv("HOMEPATH")
+		home = filepath.Join(os.Getenv("HOMEDRIVE"), os.Getenv("HOMEPATH"))
 		if home == "" {
 			home = os.Getenv("USERPROFILE")
 		}
