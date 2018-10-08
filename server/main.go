@@ -48,6 +48,7 @@ func main() {
 	// the RPC API
 	//
 	// TODO: timeouts
+	// TODO: the publicKeyVerifier should verify if the public key is part of the organization (it has been signed)
 	serverConfig := disco.Config{
 		HandshakePattern:  disco.Noise_IK,
 		KeyPair:           keyPair,
@@ -55,7 +56,7 @@ func main() {
 	}
 
 	// listen on port 6666
-	listener, err := disco.Listen("tcp", "127.0.0.1:7474", &serverConfig)
+	listener, err := disco.ListenDisco("tcp", "127.0.0.1:7474", &serverConfig)
 	if err != nil {
 		fmt.Println("RPC server cannot setup a listener:", err)
 		return

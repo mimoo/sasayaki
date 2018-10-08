@@ -8,6 +8,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	s "github.com/mimoo/sasayaki/serialization"
+
+	disco "github.com/mimoo/disco/libdisco"
 )
 
 type pendingMessage struct {
@@ -17,16 +19,25 @@ type pendingMessage struct {
 	content []byte
 }
 
-var pendingMessages map[string]pendingMessage
+var pendingMessages map[string][]pendingMessage
 
-func sasayakiServer(listener net.Listener) {
+func sasayakiServer(listener *disco.Listener) {
 	for {
-		conn, err := listener.Accept()
+		conn, err := listener.AcceptDisco()
 		if err != nil {
 			log.Println("rpc server cannot accept client:", err)
 			continue
 		}
 		log.Println("client accepted", conn.RemoteAddr().String())
+
+		//		clientKey, err := disco.Conn(conn).RemotePublicKey()
+		clientKey, err := conn.RemotePublicKey()
+		if err != nil {
+			log.Println("cannot read client public key:", err)
+			conn.Close()
+			continue
+		}
+		log.Println("client accepted", clientKey)
 
 		go handleClient(conn)
 	}
@@ -54,11 +65,22 @@ func handleClient(conn net.Conn) {
 			break
 		}
 
-		// ...
-		fmt.Println(request) // should parse that
-		// should handle the request here
-		resp := &s.ResponseMessages{}
-		fmt.Println(resp)
+		switch request.GetRequestType() {
+		case s.Request_GetPendingMessages:
+			log.Println("client is requesting to get pending messages")
+			/*
+				am = []s.ResponseMessages_Message
+
+				pm := pendingMessages[clientKey]
+
+				resp := &s.ResponseMessages{
+					Messages: am,
+				}*/
+		default:
+			fmt.Println("request cannot be parsed yet")
+			break
+		}
+
 	}
 
 	log.Printf("%s closed the connection\n", conn.RemoteAddr().String())
