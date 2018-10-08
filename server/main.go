@@ -1,84 +1,91 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+	"flag"
+	"fmt"
 	"log"
-	"net"
-	"net/http"
+
+	disco "github.com/mimoo/disco/libdisco"
+)
+
+const (
+	defaultKeyPairFile = "server.keypair"
 )
 
 func main() {
+	// Flags
+	genKeyPair := flag.Bool("gen_keypair", false, "generate a keypair for the server")
+	keyPairFile := flag.String("keypair_file", defaultKeyPairFile, "sets the server.keypair location (default to current directory)")
+	runServer := flag.Bool("run", false, "runs the Sasayaki Server")
+
+	flag.Parse()
+
+	// Init
+	fmt.Println("==== Sasayaki Server ====")
+
+	if *genKeyPair {
+		_, err := disco.GenerateAndSaveDiscoKeyPair(*keyPairFile, "")
+		if err != nil {
+			panic("server cannot store keypair")
+		}
+		fmt.Println("Sasayaki server successfuly generated private key at location ", *keyPairFile)
+		return
+	}
+
+	if !*runServer {
+		flag.PrintDefaults()
+		return
+	}
+
+	keyPair, err := disco.LoadDiscoKeyPair(*keyPairFile, "")
+	if err != nil {
+		panic("server cannot load keypair")
+		return
+	}
+
 	//
 	// the RPC API
 	//
-	http.HandleFunc("/", func(rw http.ResponseWriter, req *http.Request) {
-		rw.Write([]byte("Hello, world\n"))
-	})
-
-	server := &http.Server{
-		Addr: "localhost:7474",
-		TLSConfig: &tls.Config{
-			// Avoids most of the memorably-named TLS attacks
-			MinVersion: tls.VersionTLS12,
-			// Causes servers to use Go's default ciphersuite preferences,
-			// which are tuned to avoid attacks. Does nothing on clients.
-			PreferServerCipherSuites: true,
-			// Only use curves which have constant-time implementations
-			CurvePreferences: []tls.CurveID{
-				tls.CurveP256,
-			},
-		},
+	// TODO: timeouts
+	serverConfig := disco.Config{
+		HandshakePattern:  disco.Noise_IK,
+		KeyPair:           keyPair,
+		PublicKeyVerifier: func(publicKey, proof []byte) bool { return true },
 	}
 
-	err := server.ListenAndServeTLS("cert.pem", "key.pem")
+	// listen on port 6666
+	listener, err := disco.Listen("tcp", "127.0.0.1:7474", &serverConfig)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("RPC server cannot setup a listener:", err)
+		return
 	}
+	addr := listener.Addr().String()
+	fmt.Println("RPC server listening on:", addr)
+
+	// currently only accept one client
+	go sasayakiServer(listener)
 
 	//
 	// Push notifications
 	//
 
-	cert, err := tls.LoadX509KeyPair("cert.pem", "key.key")
+	// listen on port 6666
+	// TODO: different timeouts? keep-alive?
+	notification, err := disco.Listen("tcp", "127.0.0.1:7475", &serverConfig)
 	if err != nil {
-		panic("server: can't load keys")
+		fmt.Println("notification server cannot setup a listener:", err)
+		return
 	}
+	addr = notification.Addr().String()
+	fmt.Println("notification server listening on:", addr)
 
-	listener, err := tls.Listen("tcp", "localhost:7475", &tls.Config{
-		Certificates:             []tls.Certificate{cert},
-		PreferServerCipherSuites: true,
-		MinVersion:               tls.VersionTLS12,
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP256,
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-
+	// currently only accept one client
 	for {
-		conn, err := listener.Accept()
+		conn, err := notification.Accept()
 		if err != nil {
-			log.Printf("server: accept: %s", err)
-			break
+			log.Println("notification server couldn't accept client:", err)
+			continue
 		}
-		log.Printf("server: accepted from %s", conn.RemoteAddr())
-		tlscon, ok := conn.(*tls.Conn)
-		if ok {
-			log.Print("ok=true")
-			state := tlscon.ConnectionState()
-			for _, v := range state.PeerCertificates {
-				log.Print(x509.MarshalPKIXPublicKey(v.PublicKey))
-			}
-		}
-		go handleClient(conn)
+		go handleNotificationClient(conn)
 	}
-}
-
-func handleClient(conn net.Conn) {
-	// save the client in a list of client somewhere
-
-	//
-	conn.Close()
 }

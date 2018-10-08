@@ -8,3 +8,10 @@
     - does that only protects signing on?
     - or it could be used to start the application /recover with an encrypted backup we store
     - this allows us to onboard people/
+
+## Client
+
+## Server
+
+* needs to store shit in database (postgresql? mysql?)
+* keep a list of people subscribed

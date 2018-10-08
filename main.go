@@ -2,8 +2,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -18,11 +16,16 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 
 	_ "github.com/mattn/go-sqlite3"
+	disco "github.com/mimoo/disco/libdisco"
 )
 
 const (
 	serverIp   = "127.0.0.1"
 	serverPort = "6861"
+)
+
+var (
+	keyPair *disco.KeyPair
 )
 
 func main() {
@@ -35,12 +38,19 @@ func main() {
 	}
 
 	// Initialization
-	keyPair, err := initSasayaki(string(passphrase))
+	keyPair, err = initSasayaki(string(passphrase))
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println(keyPair)
+
+	//
+	// INIT CONFIGURATION
+	// should be a map[key]value
+	// that can be saved as a key-value store converted to a json file
+	// don't think this file needs to be encrypted?
+	//
 
 	// Contacts
 	// - id
@@ -137,24 +147,22 @@ func main() {
 	// PUSH NOTIFICATIONS
 	//
 
-	roots := x509.NewCertPool()
-	ok := roots.AppendCertsFromPEM([]byte(rootPEM))
-	if !ok {
-		panic("sasayaki: failed to parse root certificate")
+	// configure the Disco connection with Noise_IK
+	clientConfig := disco.Config{
+		KeyPair:              keyPair,
+		HandshakePattern:     disco.Noise_IK,
+		StaticPublicKeyProof: []byte{},
 	}
 
-	conn, err := tls.Dial("tcp", "localhost:7474", &tls.Config{
-		// Avoids most of the memorably-named TLS attacks
-		MinVersion: tls.VersionTLS12,
-		// Only use curves which have constant-time implementations
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP256,
-		},
-		RootCAs: roots,
-	})
+	// Dial the port 6666 of localhost
+	conn, err := disco.Dial("tcp", "127.0.0.1:6666", &clientConfig)
 	if err != nil {
-		panic("failed to connect: " + err.Error())
+		fmt.Println("client can't connect to server:", err)
+		return
 	}
+	defer conn.Close()
+	fmt.Println("connected to", conn.RemoteAddr())
+
 	fmt.Println("connected to the Sasayaki Hub")
 	defer conn.Close()
 
@@ -189,7 +197,7 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
+	fmt.Fprintf(w, "Hello %s!<br><a href=#>add someone</a>", keyPair.ExportPublicKey())
 }
 
 func openbrowser(url string) {
