@@ -4,9 +4,10 @@ package serialization;
 message Request {
 
 	enum RequestType {
-	  GetPendingMessages = 0;
-	  GetOrganizationMembers = 1;
-	  GetProofsForMember = 2;
+		GetNothing = 0;
+	  GetPendingMessages = 1;
+	  GetOrganizationMembers = 2;
+	  GetProofsForMember = 3;
 	}
 
 	RequestType requestType = 1;
@@ -16,7 +17,9 @@ message ResponseMessages {
  
    message Message {
     string fromPublicKey = 1;
-    bytes content = 2;
+    int64 id = 2;
+    int64 convo_id = 3;
+    bytes content = 4;
    }
 
    repeated Message messages = 1;

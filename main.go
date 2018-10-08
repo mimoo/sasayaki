@@ -4,8 +4,8 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/crypto/ssh/terminal"
 
+	"github.com/golang/protobuf/proto"
 	s "github.com/mimoo/sasayaki/serialization"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -38,6 +39,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// TODO: let the user enter the passphrase from the webapp
 
 	// Initialization
 	keyPair, err = initSasayaki(string(passphrase))
@@ -122,13 +125,19 @@ func main() {
 	}()
 
 	// open on browser
-	fmt.Println("interface listening on", url)
+	fmt.Println("To use Sasayaki, open the following url in your favorite browser:", url)
 	openbrowser(url)
 
+	// TODO: we should still be able to access the webapp if this doesn't work v
+	// or better, this GET request should get triggered by the webapp, and if it doesn't work tell the user
+	// that perhaps the server is not configured correctly
+
 	// connect to the Sasayaki hub server to request last messages
+	remoteKey, _ := hex.DecodeString("1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21")
 	clientConfig := disco.Config{
 		KeyPair:              keyPair,
 		HandshakePattern:     disco.Noise_IK,
+		RemoteKey:            remoteKey, // TODO: should be in a config file
 		StaticPublicKeyProof: []byte{},
 	}
 
@@ -140,9 +149,25 @@ func main() {
 		return
 	}
 
-	req := s.Request{s.Request_GetPendingMessages}
+	req := &s.Request{RequestType: s.Request_GetPendingMessages}
 
-	disco.Write([]byte())
+	data, err := proto.Marshal(req)
+	fmt.Println("going to send", data)
+	if err != nil {
+		log.Panic("marshaling error: ", err)
+	}
+	_, err = conn.Write(data)
+
+	if err != nil {
+		panic("can't write to the server") // TODO: should I really panic here?
+	}
+
+	var buffer [3000]byte
+	n, err := conn.Read(buffer[:])
+	if err != nil {
+		panic("can't read from the server") // TODO: should I really panic here?
+	}
+	fmt.Println("response received:", buffer[:n])
 
 	conn.Close()
 
@@ -166,50 +191,51 @@ func main() {
 	// PUSH NOTIFICATIONS
 	//
 
-	// Dial the port 6666 of localhost
-	conn, err := disco.Dial("tcp", "127.0.0.1:7475", &clientConfig)
-	if err != nil {
-		fmt.Println("client can't connect to server:", err)
-		return
-	}
-	defer conn.Close()
-	fmt.Println("connected to", conn.RemoteAddr())
-
-	fmt.Println("connected to the Sasayaki Hub")
-	defer conn.Close()
-
-	// send our publickey
-	conn.Write([]byte(keyPair.ExportPublicKey()))
-
-	// receive push notifications
-	var buffer [1]byte
-	for {
-		_, err := conn.Read(buffer[:])
-		if err != io.EOF {
-			fmt.Println("sasayaki: server closed the connection")
-			break
-		} else if err != nil {
-			panic(err)
+	/*
+		// Dial the port 6666 of localhost
+		notification, err := disco.Dial("tcp", "127.0.0.1:7475", &clientConfig)
+		if err != nil {
+			fmt.Println("client can't connect to server:", err)
+			return
 		}
+		defer notification.Close()
+		fmt.Println("connected to", notification.RemoteAddr())
 
-		switch buffer[0] {
-		case 0:
-			fmt.Println("sasayaki: new contact request")
-		case 1:
-			fmt.Println("sasayaki: new conversation")
-		case 2:
-			fmt.Println("sasayaki: new message")
-		default:
-			fmt.Println("sasayaki: notification message not understood")
+		fmt.Println("connected to the Sasayaki Hub")
+		defer notification.Close()
+
+		// send our publickey
+		notification.Write([]byte(keyPair.ExportPublicKey()))
+
+		// receive push notifications
+		var buffer [1]byte
+		for {
+			_, err := notification.Read(buffer[:])
+			if err != io.EOF {
+				fmt.Println("sasayaki: server closed the connection")
+				break
+			} else if err != nil {
+				panic(err)
+			}
+
+			switch buffer[0] {
+			case 0:
+				fmt.Println("sasayaki: new contact request")
+			case 1:
+				fmt.Println("sasayaki: new conversation")
+			case 2:
+				fmt.Println("sasayaki: new message")
+			default:
+				fmt.Println("sasayaki: notification message not understood")
+			}
 		}
-	}
-
+	*/
 	//
 	fmt.Println("Bye bye!")
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Hello %s!<br><a href=#>add someone</a>", keyPair.ExportPublicKey())
+	fmt.Fprintf(w, "<html><body>Hello <code>%s</code><br><a href=#>add someone</a></body></html>", keyPair.ExportPublicKey())
 }
 
 func openbrowser(url string) {

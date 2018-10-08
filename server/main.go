@@ -42,6 +42,7 @@ func main() {
 		panic("server cannot load keypair")
 		return
 	}
+	fmt.Println("Sasayaki Hub's public key:", keyPair.ExportPublicKey())
 
 	//
 	// the RPC API

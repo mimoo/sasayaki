@@ -10,11 +10,14 @@ import (
 	s "github.com/mimoo/sasayaki/serialization"
 )
 
-getMessage := &s.GetMessage{
-			Type: proto.String("getlist"),
-			Type:  proto.Int32(17),
-			Reps:  []int64{1, 2, 3},
-		}
+type pendingMessage struct {
+	fromKey string
+	id      uint64
+	convoId uint64
+	content []byte
+}
+
+var pendingMessages map[string]pendingMessage
 
 func sasayakiServer(listener net.Listener) {
 	for {
@@ -23,8 +26,9 @@ func sasayakiServer(listener net.Listener) {
 			log.Println("rpc server cannot accept client:", err)
 			continue
 		}
+		log.Println("client accepted", conn.RemoteAddr().String())
 
-		handleClient(conn)
+		go handleClient(conn)
 	}
 }
 
@@ -32,6 +36,7 @@ func handleClient(conn net.Conn) {
 	buffer := make([]byte, 3000)
 
 	for {
+		// read socket
 		n, err := conn.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
@@ -39,10 +44,23 @@ func handleClient(conn net.Conn) {
 			}
 			break // always break on error
 		}
-		request := buffer[:n]
-		fmt.Println(request) // should json parse that
+		log.Println("received message from client")
+
+		// parse protobuff request
+		request := &s.Request{}
+		err = proto.Unmarshal(buffer[:n], request)
+		if err != nil {
+			log.Println("unmarshaling error: ", err)
+			break
+		}
+
+		// ...
+		fmt.Println(request) // should parse that
 		// should handle the request here
+		resp := &s.ResponseMessages{}
+		fmt.Println(resp)
 	}
 
+	log.Printf("%s closed the connection\n", conn.RemoteAddr().String())
 	conn.Close()
 }
