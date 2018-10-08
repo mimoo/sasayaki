@@ -119,4 +119,21 @@ If the recipient is a new contact, he/she must first accept by completing the ha
 * these could also be further divided by teams, or cross signed?
 
 
+# Details
+
+* we use protobuf, why? It seems way faster than json. See first section of https://developers.google.com/protocol-buffers/docs/gotutorial as well
+
+# API
+
+## GET
+
+* get_messages: get all messages pending for myself
+* 
+
+## POST
+
+* message_read_ack: tells the forwarder that it can safely delete a message (otherwise it will be deleted after X days)
+* send_message: send a message to someone
+* 
+
 

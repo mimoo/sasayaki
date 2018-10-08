@@ -71,6 +71,7 @@ func main() {
 
 	// listen on port 6666
 	// TODO: different timeouts? keep-alive?
+	// I think to avoid DoS I need keep-alive
 	notification, err := disco.Listen("tcp", "127.0.0.1:7475", &serverConfig)
 	if err != nil {
 		fmt.Println("notification server cannot setup a listener:", err)

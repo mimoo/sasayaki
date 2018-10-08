@@ -5,7 +5,16 @@ import (
 	"io"
 	"log"
 	"net"
+
+	"github.com/golang/protobuf/proto"
+	s "github.com/mimoo/sasayaki/serialization"
 )
+
+getMessage := &s.GetMessage{
+			Type: proto.String("getlist"),
+			Type:  proto.Int32(17),
+			Reps:  []int64{1, 2, 3},
+		}
 
 func sasayakiServer(listener net.Listener) {
 	for {
