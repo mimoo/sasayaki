@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/crypto/ssh/terminal"
 
+	s "github.com/mimoo/sasayaki/serialization"
+
 	_ "github.com/mattn/go-sqlite3"
 	disco "github.com/mimoo/disco/libdisco"
 )
@@ -123,10 +125,27 @@ func main() {
 	fmt.Println("interface listening on", url)
 	openbrowser(url)
 
-	//
-	//
-	// connect to the Sasayaki "hub?" server
-	// I think this should be done using TLS + gRPC instead
+	// connect to the Sasayaki hub server to request last messages
+	clientConfig := disco.Config{
+		KeyPair:              keyPair,
+		HandshakePattern:     disco.Noise_IK,
+		StaticPublicKeyProof: []byte{},
+	}
+
+	// TODO: have a config file for this ip
+	// TODO: perhaps even a configurator on first launch that asks for it
+	conn, err := disco.Dial("tcp", "127.0.0.1:7474", &clientConfig)
+	if err != nil {
+		fmt.Println("can't connect to hub:", err)
+		return
+	}
+
+	req := s.Request{s.Request_GetPendingMessages}
+
+	disco.Write([]byte())
+
+	conn.Close()
+
 	//
 	// /get_new_messages (sorted)
 	//
@@ -147,15 +166,8 @@ func main() {
 	// PUSH NOTIFICATIONS
 	//
 
-	// configure the Disco connection with Noise_IK
-	clientConfig := disco.Config{
-		KeyPair:              keyPair,
-		HandshakePattern:     disco.Noise_IK,
-		StaticPublicKeyProof: []byte{},
-	}
-
 	// Dial the port 6666 of localhost
-	conn, err := disco.Dial("tcp", "127.0.0.1:6666", &clientConfig)
+	conn, err := disco.Dial("tcp", "127.0.0.1:7475", &clientConfig)
 	if err != nil {
 		fmt.Println("client can't connect to server:", err)
 		return

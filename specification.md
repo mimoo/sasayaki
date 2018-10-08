@@ -133,6 +133,7 @@ If the recipient is a new contact, he/she must first accept by completing the ha
 ## POST
 
 * message_read_ack: tells the forwarder that it can safely delete a message (otherwise it will be deleted after X days)
+  - we can send several ack in the message msg
 * send_message: send a message to someone
 * 
 

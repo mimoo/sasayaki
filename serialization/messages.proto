@@ -1,22 +1,31 @@
 syntax = "proto3";
 package serialization;
  
-message GetMessage {
-  string clientName = 1;
-  int32 clientId = 2;
-  string description = 3 [default = "NONE"];
-  repeated MsgItem messageitems = 4;
+message Request {
+
+	enum RequestType {
+	  GetPendingMessages = 0;
+	  GetOrganizationMembers = 1;
+	  GetProofsForMember = 2;
+	}
+
+	RequestType requestType = 1;
+}
+
+message ResponseMessages {
  
-  enum RequestType {
-    GetMessages = 0;
-    GetContacts = 1;
-    GetProofs = 2;
-  }
- 
-   message MsgItem {
-    int32 id = 1;
-    string itemName = 2;
-    int32 itemValue = 3;
-    RequestType requestType = 4;
+   message Message {
+    string fromPublicKey = 1;
+    bytes content = 2;
    }
+
+   repeated Message messages = 1;
+}
+
+message ResponseMembers {
+
+}
+
+message ResponseProofs {
+	
 }
