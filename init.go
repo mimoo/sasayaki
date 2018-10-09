@@ -27,6 +27,8 @@ func initSasayaki(passphrase string) (configuration, *disco.KeyPair) {
 }
 
 type configuration struct {
+	addressUI string `json:"address_ui"`
+
 	HubAddress   string `json:"hub_address"`
 	HubPublicKey string `json:"hub_publickey"`
 }
@@ -49,6 +51,19 @@ func initConfiguration() configuration {
 	// parse it
 	cfg := configuration{}
 	json.Unmarshal(configJSON, &cfg)
+
+	// TODO: remove this default
+	if len(cfg.HubPublicKey) == 0 {
+		cfg.HubPublicKey = "1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21"
+	}
+	// TODO: remove this default
+	if cfg.HubAddress == "" {
+		cfg.HubAddress = "127.0.0.1:7474"
+	}
+	if cfg.addressUI == "" {
+		cfg.addressUI = "127.0.0.1:7473"
+	}
+
 	//
 	return cfg
 }

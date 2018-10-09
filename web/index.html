@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hello Bulma!</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.1/css/bulma.min.css">
+    <script defer src="https://use.fontawesome.com/releases/v5.3.1/js/all.js"></script>
+    <style>
+      body{
+        margin:0 50px;
+      }
+      .alice {
+        margin-left:20px;
+      }
+      .bob{
+        margin-right:20px;
+      }
+      .minify{
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+
+    <section class="hero is-primary">
+      <div class="hero-body">
+        <div class="container">
+          <h1 class="title">
+            Sasayaki Messenger
+          </h1>
+          <h2 class="subtitle">
+             Connected as <code>{{.Identity}}</code>
+          </h2>
+        </div>
+      </div>
+    </section>
+
+    <div class="tabs">
+      <ul>
+        <li class="is-active">
+          <a>
+            <span class="icon is-small"><i class="fas fa-comments" aria-hidden="true"></i></span>
+            <span>Messages</span>
+          </a>
+        </li>
+        <li>
+          <a>
+            <span class="icon is-small"><i class="fas fa-users" aria-hidden="true"></i></span>
+            <span>Users</span>
+          </a>
+        </li>
+        <li>
+          <a>
+            <span class="icon is-small"><i class="fas fa-sitemap" aria-hidden="true"></i></span>
+            <span>Teams</span>
+          </a>
+        </li>
+        <li>
+          <a>
+            <span class="icon is-small"><i class="fas fa-sliders-h" aria-hidden="true"></i></span>
+            <span>Settings</span>
+          </a>
+        </li>
+      </ul>
+    </div>
+
+    <div class="columns">
+      <div class="column is-one-fifth">
+
+        
+        <nav class="panel">
+          <div class="panel-block">
+            <p class="control has-icons-left">
+              <input class="input is-small" type="text" placeholder="search">
+              <span class="icon is-small is-left">
+                <i class="fas fa-search" aria-hidden="true"></i>
+              </span>
+            </p>
+          </div>
+
+          <a class="panel-block is-active">
+            David
+          </a>
+          <a class="panel-block">
+            Jason
+          </a>
+          <a class="panel-block">
+            Rob
+          </a>
+          <a class="panel-block">
+            Aleks
+          </a>
+          <a class="panel-block">
+            Mason
+          </a>
+          <a class="panel-block">
+            Javed
+          </a>
+
+          <div class="panel-block">
+            <button class="button is-link is-outlined is-fullwidth">
+              new conversation
+            </button>
+          </div>
+        </nav>
+
+      </div>
+      <div class="column">
+
+      <section>
+
+        <div class="box">
+          <article class="media">
+            <div class="media-content">
+              <div class="content">
+                <p>
+                  <strong>David</strong> <small>@cryptoservices</small> <span class="tag is-primary">verified</span>
+                </p>
+              </div>
+              <nav class="level is-mobile">
+                <div class="level-left">
+                  <a class="level-item" aria-label="reply">
+                    verify
+                  </a>
+                  <a class="level-item" aria-label="retweet">
+                    revoke
+                  </a>
+                  <a class="level-item" aria-label="like">
+                    see verifications
+                  </a>
+                </div>
+              </nav>
+            </div>
+          </article>
+        </div>
+
+<article class="message is-danger bob">
+  <div class="message-header">
+    <p> <small>jan 31, 2018 at 03:05am</small></p>
+    <i class="fas fa-minus-square minify"></i>
+  </div>
+  <div class="message-body">
+    Lorem ipsum dolor sit amet, consectetur adipisicing elit. Consequatur consectetur dolorem quos esse excepturi ratione quibusdam optio suscipit recusandae numquam perspiciatis iste pariatur quam magni quis, architecto voluptatum exercitationem! Velit.Lorem ipsum dolor sit amet, consectetur adipisicing elit. Nisi officiis doloribus, esse non neque alias voluptas maiores eius amet reiciendis, unde quisquam odio. Reiciendis harum ducimus odit et vel rem.
+  </div>
+</article>
+
+<article class="message is-danger bob">
+  <div class="message-header">
+    <p> <small>jan 31, 2018 at 03:05am</small></p>
+    <i class="fas fa-minus-square minify"></i>
+  </div>
+  <div class="message-body">
+    A message coming from someone else
+  </div>
+</article>
+
+<article class="message is-info alice">
+  <div class="message-header">
+    <p> <small>jan 31, 2018 at 03:05am</small></p>
+    <i class="fas fa-minus-square minify"></i>
+  </div>
+  <div class="message-body">
+    A message coming from me
+  </div>
+</article>
+
+<hr>
+
+<div class="field">
+  <div class="control">
+    <textarea class="textarea" placeholder="your message"></textarea>
+  </div>
+</div>
+
+<div class="control">
+  <button class="button is-primary">Send message</button>
+</div>
+
+</section>
+
+
+      </div>
+    </div>
+
+
+    <footer class="footer">
+      <div class="content has-text-centered">
+        <p>
+          <strong>Sasayaki</strong> by <a href="#">Cryptography Services</a> @ <a href="https://www.nccgroup.com">NCC Group</a>.
+        </p>
+      </div>
+    </footer>
+
+
+  </body>
+</html>

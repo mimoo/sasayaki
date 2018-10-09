@@ -44,7 +44,11 @@ func sasayakiServer(listener *disco.Listener) {
 }
 
 func handleClient(conn net.Conn) {
-	buffer := make([]byte, 3000)
+	//
+	// TODO: is it necessary to create this huge buffer here?
+	// don't proto have some functions to do that?
+	//
+	buffer := make([]byte, 10000)
 
 	for {
 		// read socket
@@ -76,6 +80,9 @@ func handleClient(conn net.Conn) {
 				resp := &s.ResponseMessages{
 					Messages: am,
 				}*/
+		case s.Request_SendMessage:
+			log.Println("client is requesting to send a message")
+			handleSendMessage(conn, request)
 		default:
 			fmt.Println("request cannot be parsed yet")
 			break
@@ -85,4 +92,10 @@ func handleClient(conn net.Conn) {
 
 	log.Printf("%s closed the connection\n", conn.RemoteAddr().String())
 	conn.Close()
+}
+
+func handleSendMessage(conn net.Conn, req *s.Request) {
+
+	// write success or not
+
 }

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sync"
 
 	"golang.org/x/crypto/ssh/terminal"
 
@@ -20,13 +19,13 @@ import (
 type sasayakiState struct {
 	conn net.Conn
 
-	queryMutex sync.Mutex // one hub query at a time
-
 	config  configuration
 	keyPair *disco.KeyPair
+
+	token [16]byte // for the webapp
 }
 
-var state sasayakiState
+var ss sasayakiState
 
 func main() {
 	// Welcome + Passphrase
@@ -39,32 +38,33 @@ func main() {
 	}
 
 	// Initialization
-	state.config, state.keyPair = initSasayaki(string(passphrase))
+	ss.config, ss.keyPair = initSasayaki(string(passphrase))
+	initDatabaseManager()
+	initHubManager()
 
 	//
-	fmt.Println("this is your public key:", state.keyPair.ExportPublicKey())
-	fmt.Println("this is the current config:", state.config)
+	fmt.Println("this is your public key:", ss.keyPair.ExportPublicKey())
+	fmt.Println("this is the current config:", ss.config)
 
 	// TODO: Create server at 127.0.0.1:nextOpenPort
 	// TODO: serve a one-page js that removes the authToken and stores it in
 	// TODO:use websockets for messages? (if I want to emulate email I can just use websocket as push notification)
 	// TODO: package the app so that it's launched in the menu bar, not from a terminal
-	var token [16]byte
-	_, err = rand.Read(token[:])
+	_, err = rand.Read(ss.token[:])
 	if err != nil {
 		panic(err)
 	}
 
-	http.HandleFunc("/", handler)
-	url := fmt.Sprintf("http://localhost:7373/?token=%s", base64.StdEncoding.EncodeToString(token[:]))
-	go func() {
-		panic(http.ListenAndServe("localhost:7373", nil))
-	}()
+	url := fmt.Sprintf("http://%s/?token=%s", ss.config.addressUI, base64.StdEncoding.EncodeToString(ss.token[:]))
+
+	// serve the local webpage
+	//go serveLocalWebPage(ss.config.addressUI)
 
 	// open on browser
 	fmt.Println("To use Sasayaki, open the following url in your favorite browser:", url)
-	openbrowser(url)
+	//	openbrowser(url)
 
+	serveLocalWebPage(ss.config.addressUI)
 	//
 	// /get_new_messages (sorted)
 	//
@@ -129,7 +129,7 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<html><body>Hello <code>%s</code><br><a href=#>add someone</a></body></html>", state.keyPair.ExportPublicKey())
+	fmt.Fprintf(w, "<html><body>Hello <code>%s</code><br><a href=#>add someone</a></body></html>", ss.keyPair.ExportPublicKey())
 }
 
 func openbrowser(url string) {

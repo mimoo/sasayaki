@@ -1,24 +1,36 @@
 syntax = "proto3";
 package serialization;
- 
+
 message Request {
 
 	enum RequestType {
 		GetNothing = 0;
 	  GetPendingMessages = 1;
-	  GetOrganizationMembers = 2;
-	  GetProofsForMember = 3;
+	  SendMessage = 2;
+	  GetOrganizationMembers = 3;
+	  GetProofsForMember = 4;
+	}
+	message Message {
+	  string toAddress = 1;
+	  uint64 id = 2;
+	  uint64 convo_id = 3;
+	  bytes content = 4;
 	}
 
 	RequestType requestType = 1;
+	Message message = 2;
+}
+
+message ResponseSuccess {
+	bool success = 1;
 }
 
 message ResponseMessages {
  
    message Message {
     string fromPublicKey = 1;
-    int64 id = 2;
-    int64 convo_id = 3;
+    uint64 id = 2;
+    uint64 convo_id = 3;
     bytes content = 4;
    }
 
