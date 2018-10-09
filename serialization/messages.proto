@@ -1,16 +1,18 @@
 syntax = "proto3";
 package serialization;
 
+// A unique Request message with all the different types of requests
 message Request {
 
 	enum RequestType {
 		GetNothing = 0;
-	  GetPendingMessages = 1;
+	  GetNextMessage = 1;
 	  SendMessage = 2;
 	  GetOrganizationMembers = 3;
 	  GetProofsForMember = 4;
 	  PublishProof = 5;
 	}
+
 	message Message {
 	  string toAddress = 1;
 	  uint64 id = 2;
@@ -22,27 +24,16 @@ message Request {
 	Message message = 2;
 }
 
+// Simple Response  
 message ResponseSuccess {
 	bool success = 1;
 	string error = 2;
 }
 
-message ResponseMessages {
- 
-   message Message {
-    string fromPublicKey = 1;
-    uint64 id = 2;
-    uint64 convo_id = 3;
-    bytes content = 4;
-   }
-
-   repeated Message messages = 1;
-}
-
-message ResponseMembers {
-
-}
-
-message ResponseProofs {
-	
+// Response with a message
+message ResponseMessage {
+  string fromAddress = 1;
+  uint64 id = 2;
+  uint64 convo_id = 3;
+  bytes content = 4;
 }

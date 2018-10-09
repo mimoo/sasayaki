@@ -2,6 +2,13 @@
 // for testing only
 package main
 
+import "sync"
+
+type memory struct {
+	pendingMessages map[string][]Message // in-memory pending messages (for testing)
+	queryMutex      sync.Mutex           // one query at a time
+}
+
 type Message struct {
 	fromAddress string
 	id          uint64
@@ -10,9 +17,9 @@ type Message struct {
 }
 
 var (
-	pendingMessages map[string][]Message // in-memory pending messages (for testing)
+	mm memory
 )
 
 func init() {
-	pendingMessages = make(map[string][]Message)
+	mm.pendingMessages = make(map[string][]Message)
 }

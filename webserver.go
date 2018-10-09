@@ -45,7 +45,7 @@ const (
 func serveLocalWebPage(localAddress string) {
 	r := mux.NewRouter()
 	r.HandleFunc("/", getApp).Methods("GET")
-	r.HandleFunc("/get_new_messages", getNewMessages).Methods("GET")
+	r.HandleFunc("/get_new_message", getNewMessage).Methods("GET")
 	r.HandleFunc("/send_message", sendMessage).Methods("POST")
 
 	panic(http.ListenAndServe(localAddress, r))
@@ -97,17 +97,29 @@ func getApp(w http.ResponseWriter, r *http.Request) {
 // JSON API
 //
 
-// http get http://127.0.0.1:7473/get_new_messages Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ==
-func getNewMessages(w http.ResponseWriter, r *http.Request) {
+// getNewMessage returns one message at a time, you need to call it several time in order to retrieve
+// all your messages. It's not ideal but heh, it works for now.
+// http post http://127.0.0.1:7473/send_message Sasayaki-Token:dwl0R9o2SwuZQIAWHv-== id=5 convo_id=6 to_address="12052512a0e1cf14092224dba5a88c98ad8c5efe23f7794a122b9f0268499a10"  content="hey"
+func getNewMessage(w http.ResponseWriter, r *http.Request) {
 	// verify auth token
 	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
 		fmt.Fprintf(w, "You need to enter the correct auth token")
 		return
 	}
+	message, err := hs.getNextMessage()
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request convo id"})
+		return
+	}
+	// TODO: decrypt
+	// TODO: store in database
 	// return sample
-	json.NewEncoder(w).Encode(map[string]string{
-		"message": "one message",
-	})
+	// TODO: this sends back numbers as integers, but we should probably send them back as strings because js sucks
+	if message.GetFromAddress() == "empty" {
+		json.NewEncoder(w).Encode(map[string]string{"error": "no new messages"})
+	} else {
+		json.NewEncoder(w).Encode(message)
+	}
 }
 
 // http post http://127.0.0.1:7473/send_message Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ== id=1 convo_id=5 to=pubkey

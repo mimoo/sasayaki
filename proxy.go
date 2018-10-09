@@ -110,14 +110,14 @@ func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []
 	return res.GetSuccess(), res.GetError()
 }
 
-func (hs *hubState) getMessages() ([]byte, error) {
+func (hs *hubState) getNextMessage() (*s.ResponseMessage, error) {
 	// one query at a time
 	hs.queryMutex.Lock()
 	defer hs.queryMutex.Unlock()
 	// do we have a connection?
 	initHubManager()
 	// create query
-	req := &s.Request{RequestType: s.Request_GetPendingMessages}
+	req := &s.Request{RequestType: s.Request_GetNextMessage}
 	// serialize
 	data, err := proto.Marshal(req)
 	if err != nil {
@@ -134,6 +134,11 @@ func (hs *hubState) getMessages() ([]byte, error) {
 		hs.conn = nil
 		return nil, err
 	}
-	// return response
-	return rcvBuffer[:n], nil
+	// unserialize
+	res := &s.ResponseMessage{}
+	if err = proto.Unmarshal(rcvBuffer[:n], res); err != nil {
+		return nil, err
+	}
+	// return message
+	return res, nil
 }

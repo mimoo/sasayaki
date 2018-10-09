@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -48,7 +47,7 @@ func sasayakiServer(listener *disco.Listener) {
 		}
 		log.Println("client accepted", clientKey)
 
-		cc := &client{
+		cc := client{
 			publicKey: clientKey,
 		}
 
@@ -56,7 +55,7 @@ func sasayakiServer(listener *disco.Listener) {
 	}
 }
 
-func (cc *client) handleClient(conn net.Conn) {
+func (cc client) handleClient(conn net.Conn) {
 	//
 	// TODO: is it necessary to create this huge buffer here?
 	// don't proto have some functions to do that?
@@ -75,7 +74,6 @@ session:
 			break session // always break on error
 		}
 		log.Println("received message from client")
-
 		// parse protobuff request
 		request := &s.Request{}
 		err = proto.Unmarshal(buffer[:n], request)
@@ -83,18 +81,14 @@ session:
 			log.Println("unmarshaling error: ", err)
 			break session
 		}
-
+		// what kind of request?
 		switch request.GetRequestType() {
-		case s.Request_GetPendingMessages:
-			log.Println("client is requesting to get pending messages")
-			/*
-				am = []s.ResponseMessages_Message
-
-				pm := pendingMessages[clientKey]
-
-				resp := &s.ResponseMessages{
-					Messages: am,
-				}*/
+		case s.Request_GetNextMessage:
+			log.Println("client is requesting to get next message")
+			if err := cc.handleGetNextMessage(conn, request); err != nil {
+				log.Println("client session closing:", err)
+				break session
+			}
 		case s.Request_SendMessage:
 			log.Println("client is requesting to send a message")
 			if err := cc.handleSendMessage(conn, request); err != nil {
@@ -102,7 +96,7 @@ session:
 				break session
 			}
 		default:
-			fmt.Println("request cannot be parsed yet")
+			log.Println("request cannot be parsed yet")
 			break session
 		}
 
@@ -128,7 +122,7 @@ func success(conn net.Conn, success bool, message string) error {
 
 // handleSendMessage attempts to send the message. Returns an error if it doesn't work
 // because of conn. Otherwise send a failure proto message
-func (cc *client) handleSendMessage(conn net.Conn, req *s.Request) error {
+func (cc client) handleSendMessage(conn net.Conn, req *s.Request) error {
 	// parse request
 	id := req.Message.GetId()
 	convoId := req.Message.GetConvoId()
@@ -145,14 +139,46 @@ func (cc *client) handleSendMessage(conn net.Conn, req *s.Request) error {
 	toAddress = strings.ToLower(toAddress)
 	// handle the message (TODO: do it w/ a database)
 
-	pendingMessages[toAddress] = append(pendingMessages[toAddress], Message{
+	mm.queryMutex.Lock()
+	mm.pendingMessages[toAddress] = append(mm.pendingMessages[toAddress], Message{
 		fromAddress: cc.publicKey,
 		id:          id,
 		convoId:     convoId,
 		content:     content,
 	})
+	mm.queryMutex.Unlock()
 
-	fmt.Println("current pending Messages:", pendingMessages)
 	// write success or not
 	return success(conn, true, "")
+}
+
+func (cc client) handleGetNextMessage(conn net.Conn, req *s.Request) error {
+	// empty response for now
+	res := &s.ResponseMessage{}
+	// lock memory
+	mm.queryMutex.Lock()
+	// fetch new message*s* (TODO: do it with a real db)
+	messages, ok := mm.pendingMessages[cc.publicKey]
+	// is there a new message?
+	if ok && len(messages) > 0 {
+		// fetch new message
+		message := messages[0]
+		mm.pendingMessages[cc.publicKey] = messages[1:]
+		res.FromAddress = message.fromAddress
+		res.Id = message.id
+		res.ConvoId = message.convoId
+		res.Content = message.content
+	} else {
+		res.FromAddress = "empty"
+	}
+	// unlock memory
+	mm.queryMutex.Unlock()
+	// serialize
+	data, err := proto.Marshal(res)
+	if err != nil {
+		panic(err) // TODO: can this panic be triggered maliciously?
+	}
+	// send
+	_, err = conn.Write(data)
+	return err
 }
