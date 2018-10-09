@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 // the big init function
 func initSasayaki(passphrase string) (configuration, *disco.KeyPair) {
 	initSasayakiFolder()
-	initSasayakiDatabase()
 	config := initConfiguration()
 	keyPair, err := initKeyPair(string(passphrase))
 	if err != nil {
@@ -80,56 +78,6 @@ func initSasayakiFolder() {
 	if _, err := os.Stat(keyFolder); os.IsNotExist(err) {
 		fmt.Println("sasayaki: creating configuration folder at", home)
 		os.MkdirAll(keyFolder, 0770) // user | group | all
-	}
-}
-
-// init database tables
-func initSasayakiDatabase() {
-	// Contacts
-	// - id
-	// - publickey: of the account
-	// - date: metadata
-	// - name: hector
-	//
-	// Verifications
-	// - id
-	// - publickey: of the verified account
-	// - who: publickey of verifier
-	// - date: metadata
-	// - how: via facebook
-	// - name: hector
-	// - signature: signature from "who" over "'verification' | date | publickey | len_name | name | len_how | how"
-	//
-	// Conversations
-	// - id: we can have different convos with the same person (like email)
-	// - date_creation: metadata
-	// - date_last_message: metadata
-	// - publickey: of the account
-	// - sessionkey: state after the last message
-	//
-	// Messages
-	// - id
-	// - conversation_id
-	// - date: metadata
-	// - sender: me or him
-	// - message: actual content
-
-	location := filepath.Join(sasayakiFolder(), "database.db")
-	db, err := sql.Open("sqlite3", location)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	createStatement := `
-	CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT);
-	CREATE TABLE IF NOT EXISTS verifications (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, who TEXT, date TIMESTAMP, how TEXT, name TEXT, signature TEXT);
-	CREATE TABLE IF NOT EXISTS conversations (id INTEGER PRIMARY KEY AUTOINCREMENT, date_creation TIMESTAMP, date_last_message TIMESTAMP, publickey TEXT, sessionkey TEXT);
-	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER, date TIMESTAMP, sender TEXT, message TEXT);
-	`
-	_, err = db.Exec(createStatement)
-	if err != nil {
-		panic(err)
 	}
 }
 

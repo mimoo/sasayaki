@@ -9,6 +9,7 @@ message Request {
 	  SendMessage = 2;
 	  GetOrganizationMembers = 3;
 	  GetProofsForMember = 4;
+	  PublishProof = 5;
 	}
 	message Message {
 	  string toAddress = 1;
@@ -23,6 +24,7 @@ message Request {
 
 message ResponseSuccess {
 	bool success = 1;
+	string error = 2;
 }
 
 message ResponseMessages {

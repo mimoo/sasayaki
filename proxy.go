@@ -56,7 +56,7 @@ func initHubManager() error {
 		StaticPublicKeyProof: []byte{},
 	}
 	// dial the Hub and set `conn`
-	hs.conn, err = disco.Dial("tcp", ss.config.HubPublicKey, &clientConfig)
+	hs.conn, err = disco.Dial("tcp", ss.config.HubAddress, &clientConfig)
 	if err != nil {
 		return err
 	}
@@ -66,13 +66,13 @@ func initHubManager() error {
 
 // TODO: of course encrypt the message before sending it :)
 // TODO: needs a cryptoManager? or endToEndManager? or encryptionManager
-func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, error) {
+func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, string) {
 	// one query at a time
 	hs.queryMutex.Lock()
 	defer hs.queryMutex.Unlock()
 	// do we have a connection working?
 	if err := initHubManager(); err != nil {
-		return false, err
+		return false, err.Error()
 	}
 	// create query
 	req := &s.Request{
@@ -82,31 +82,32 @@ func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []
 			Id:        id,
 			ConvoId:   convoId,
 			Content:   content,
-		}}
+		},
+	}
 	// serialize
 	data, err := proto.Marshal(req)
 	if err != nil {
-		return false, err
+		return false, err.Error()
 	}
+	fmt.Println("sending", req)
 	// send
 	if _, err := hs.conn.Write(data); err != nil {
 		hs.conn = nil
-		return false, err
+		return false, err.Error()
 	}
 	// receive
 	n, err := hs.conn.Read(rcvBuffer[:])
 	if err != nil {
 		hs.conn = nil
-		return false, err
+		return false, err.Error()
 	}
-	fmt.Println("response received:", rcvBuffer[:n])
 	// unserialize
 	res := &s.ResponseSuccess{}
 	if err = proto.Unmarshal(rcvBuffer[:n], res); err != nil {
-		return false, err
+		return false, err.Error()
 	}
 	// return
-	return res.GetSuccess(), nil
+	return res.GetSuccess(), res.GetError()
 }
 
 func (hs *hubState) getMessages() ([]byte, error) {
@@ -133,7 +134,6 @@ func (hs *hubState) getMessages() ([]byte, error) {
 		hs.conn = nil
 		return nil, err
 	}
-	fmt.Println("response received:", rcvBuffer[:n])
 	// return response
 	return rcvBuffer[:n], nil
 }

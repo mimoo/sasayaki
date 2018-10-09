@@ -55,7 +55,7 @@ func main() {
 		panic(err)
 	}
 
-	url := fmt.Sprintf("http://%s/?token=%s", ss.config.addressUI, base64.StdEncoding.EncodeToString(ss.token[:]))
+	url := fmt.Sprintf("http://%s/?token=%s", ss.config.addressUI, base64.URLEncoding.EncodeToString(ss.token[:]))
 
 	// serve the local webpage
 	//go serveLocalWebPage(ss.config.addressUI)

@@ -12,6 +12,14 @@
 //
 // This file can thus be seen as the core app, communicating between the thin webapp client and the hub
 //
+// ```
+// web browser <--JSON--> web server <--PROTOBUF--> Hub
+// ```
+//
+// Note that since the single-page web application is in javascript, uint64 numbers are not supported.
+// Fortunately, we do not need to do arithmetic from the client, and we can pretend that these are strings.
+// (We only need them as identifiers for conversations or messages.)
+//
 
 package main
 
@@ -46,9 +54,10 @@ func serveLocalWebPage(localAddress string) {
 // verifyToken obtains the Sasayaki-Token header from the request
 // then constant-time compares it to what it should be (a random 16-byte token
 // that we generated when we started the application)
-func verifyToken(r *http.Request) bool {
-	givenToken := r.Header.Get("Sasayaki-Token")
-	decodedToken, err := base64.StdEncoding.DecodeString(givenToken)
+func verifyToken(givenToken string) bool {
+	// TODO: remove this return true :)
+	return true
+	decodedToken, err := base64.URLEncoding.DecodeString(givenToken)
 	if err != nil {
 		return false
 	}
@@ -67,8 +76,16 @@ type indexData struct {
 }
 
 func getApp(w http.ResponseWriter, r *http.Request) {
+	// get the GET request and the "token" parameter
+	token := r.URL.Query().Get("token")
+	// verify auth token
+	if !verifyToken(token) {
+		fmt.Fprintf(w, "You need to enter the correct auth token")
+		return
+	}
+	// get html page
 	indexPageLocation := filepath.Join(mediaPath, "index.html")
-
+	// render the template
 	tmpl := template.Must(template.ParseFiles(indexPageLocation))
 	tmpl.Execute(w, indexData{
 		Identity: ss.keyPair.ExportPublicKey(),
@@ -83,7 +100,7 @@ func getApp(w http.ResponseWriter, r *http.Request) {
 // http get http://127.0.0.1:7473/get_new_messages Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ==
 func getNewMessages(w http.ResponseWriter, r *http.Request) {
 	// verify auth token
-	if !verifyToken(r) {
+	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
 		fmt.Fprintf(w, "You need to enter the correct auth token")
 		return
 	}
@@ -104,7 +121,7 @@ type sendMessageReq struct {
 
 func sendMessage(w http.ResponseWriter, r *http.Request) {
 	// verify auth token
-	if !verifyToken(r) {
+	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "You need to enter the correct auth token"})
 		return
 	}
@@ -135,12 +152,15 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 	// TODO: 2. is this a new convo? if so, then derive a new shared secret with c1 or c2
 	// TODO: 3. encrypt the content with that s
 	content := []byte(req.Content)
-	// use the proxy
-	success, err := hs.sendMessage(reqId, convoId, req.ToAddress, content)
+	// TODO: save in our own database
+	// TODO: increment the id counter
+
+	// use the proxy to forward the request to the hub
+	success, errMessage := hs.sendMessage(reqId, convoId, req.ToAddress, content)
 	// return
 	json.NewEncoder(w).Encode(map[string]string{
 		"success": strconv.FormatBool(success),
-		"error":   err.Error(),
+		"error":   errMessage,
 	})
 }
 

@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 	s "github.com/mimoo/sasayaki/serialization"
@@ -12,14 +14,21 @@ import (
 	disco "github.com/mimoo/disco/libdisco"
 )
 
-type pendingMessage struct {
-	fromKey string
-	id      uint64
-	convoId uint64
-	content []byte
+const (
+	messageMaxChars = 10000
+)
+
+type client struct {
+	publicKey string
 }
 
-var pendingMessages map[string][]pendingMessage
+var (
+	regexHex *regexp.Regexp // regex to test if a string is a hex string
+)
+
+func init() {
+	regexHex = regexp.MustCompile(`^[A-Fa-f0-9]+$`)
+}
 
 func sasayakiServer(listener *disco.Listener) {
 	for {
@@ -39,17 +48,23 @@ func sasayakiServer(listener *disco.Listener) {
 		}
 		log.Println("client accepted", clientKey)
 
-		go handleClient(conn)
+		cc := &client{
+			publicKey: clientKey,
+		}
+
+		go cc.handleClient(conn)
 	}
 }
 
-func handleClient(conn net.Conn) {
+func (cc *client) handleClient(conn net.Conn) {
 	//
 	// TODO: is it necessary to create this huge buffer here?
 	// don't proto have some functions to do that?
+	// worst case perhaps I should use a pool of buffer (see crypto/tls' block)
 	//
 	buffer := make([]byte, 10000)
 
+session:
 	for {
 		// read socket
 		n, err := conn.Read(buffer)
@@ -57,7 +72,7 @@ func handleClient(conn net.Conn) {
 			if err != io.EOF {
 				log.Println("rpc server cannot read client request:", err)
 			}
-			break // always break on error
+			break session // always break on error
 		}
 		log.Println("received message from client")
 
@@ -66,7 +81,7 @@ func handleClient(conn net.Conn) {
 		err = proto.Unmarshal(buffer[:n], request)
 		if err != nil {
 			log.Println("unmarshaling error: ", err)
-			break
+			break session
 		}
 
 		switch request.GetRequestType() {
@@ -82,10 +97,13 @@ func handleClient(conn net.Conn) {
 				}*/
 		case s.Request_SendMessage:
 			log.Println("client is requesting to send a message")
-			handleSendMessage(conn, request)
+			if err := cc.handleSendMessage(conn, request); err != nil {
+				log.Println("client session closing:", err)
+				break session
+			}
 		default:
 			fmt.Println("request cannot be parsed yet")
-			break
+			break session
 		}
 
 	}
@@ -94,8 +112,47 @@ func handleClient(conn net.Conn) {
 	conn.Close()
 }
 
-func handleSendMessage(conn net.Conn, req *s.Request) {
+// success sends a failure or success proto message. Returns an error if it can't write to the conn
+func success(conn net.Conn, success bool, message string) error {
+	res := &s.ResponseSuccess{
+		Success: success,
+		Error:   message,
+	}
+	data, err := proto.Marshal(res)
+	if err != nil {
+		panic(err)
+	}
+	_, err = conn.Write(data)
+	return err
+}
 
+// handleSendMessage attempts to send the message. Returns an error if it doesn't work
+// because of conn. Otherwise send a failure proto message
+func (cc *client) handleSendMessage(conn net.Conn, req *s.Request) error {
+	// parse request
+	id := req.Message.GetId()
+	convoId := req.Message.GetConvoId()
+	toAddress := req.Message.GetToAddress()
+	content := req.Message.GetContent()
+	// checking fields
+	// TODO: test if id or convo id = 0 ? (not set)
+	if len(toAddress) != 64 || content == nil || len(content) > messageMaxChars {
+		return success(conn, false, "fields are not correctly formated")
+	}
+	if !regexHex.MatchString(toAddress) {
+		return success(conn, false, "the recipient address is not [a-z0-9]")
+	}
+	toAddress = strings.ToLower(toAddress)
+	// handle the message (TODO: do it w/ a database)
+
+	pendingMessages[toAddress] = append(pendingMessages[toAddress], Message{
+		fromAddress: cc.publicKey,
+		id:          id,
+		convoId:     convoId,
+		content:     content,
+	})
+
+	fmt.Println("current pending Messages:", pendingMessages)
 	// write success or not
-
+	return success(conn, true, "")
 }
