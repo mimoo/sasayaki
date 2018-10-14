@@ -14,8 +14,8 @@
 //
 //
 // notes:
-// - id and convo id are unsigned 64bit integers. We can generate them randomly, it shouldn't matter
-// 	since we care about the tuple {convoid, toAddress, fromAddress} which has very little chance of colliding
+// - id and convo id are unsigned 64bit integers. We increment them for every message/convo. note that
+// we only care about the tuple {convoid, toAddress, fromAddress} which has very little chance of colliding
 
 package main
 
@@ -28,18 +28,19 @@ import (
 )
 
 type encryptionManager struct {
-	ds *databaseState
+	//	storage *databaseState
 }
 
-var em encryptionManager
+var e2e encryptionManager
 
-func initEncryptionManager(ds *databaseState) {
-	em.ds = ds
+/*
+func initEncryptionManager(storage *databaseState) {
+	e2e.storage = storage
 }
-
-func (em encryptionManager) encryptMessage(convoId uint64, bobAddress string, content string) ([]byte, error) {
+*/
+func (e2e encryptionManager) encryptMessage(convoId uint64, bobAddress string, content string) ([]byte, error) {
 	// get session keys
-	c1, _, err := ds.getSessionKeys(convoId, bobAddress)
+	c1, _, err := storage.getSessionKeys(convoId, bobAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -53,19 +54,19 @@ func (em encryptionManager) encryptMessage(convoId uint64, bobAddress string, co
 	if err != nil {
 		return nil, err
 	}
-	copy(toAuthenticate[8:], ss.keyPair.PublicKey[:])
+	copy(toAuthenticate[8:], ssyk.keyPair.PublicKey[:])
 	copy(toAuthenticate[40:], bobPubKey)
 	// encrypt message
 	ciphertext := s1.Send_AEAD([]byte(content), toAuthenticate)
 	// store new state
-	ds.updateSessionKeys(convoId, bobAddress, s1.Serialize(), nil)
+	storage.updateSessionKeys(convoId, bobAddress, s1.Serialize(), nil)
 	// return ciphertext
 	return ciphertext, nil
 }
 
-func (em encryptionManager) decryptMessage(convoId uint64, bobAddress string, ciphertext []byte) ([]byte, error) {
+func (e2e encryptionManager) decryptMessage(convoId uint64, bobAddress string, ciphertext []byte) ([]byte, error) {
 	// get session keys
-	_, c2, err := ds.getSessionKeys(convoId, bobAddress)
+	_, c2, err := storage.getSessionKeys(convoId, bobAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func (em encryptionManager) decryptMessage(convoId uint64, bobAddress string, ci
 		return nil, err
 	}
 	copy(toAuthenticate[8:], bobPubKey)
-	copy(toAuthenticate[40:], ss.keyPair.PublicKey[:])
+	copy(toAuthenticate[40:], ssyk.keyPair.PublicKey[:])
 	// decrypt message
 	s2 := strobe.RecoverState(c2)
 	plaintext, ok := s2.Recv_AEAD(ciphertext, toAuthenticate)
@@ -87,14 +88,14 @@ func (em encryptionManager) decryptMessage(convoId uint64, bobAddress string, ci
 		// TODO: this should completely kill the thread
 	}
 	// store new state
-	ds.updateSessionKeys(convoId, bobAddress, nil, s2.Serialize())
+	storage.updateSessionKeys(convoId, bobAddress, nil, s2.Serialize())
 	// return plaintext, new state (to be stored)
 	return plaintext, nil
 }
 
-func (em encryptionManager) createNewConvo(bobAddress string, title string) ([]byte, error) {
+func (e2e encryptionManager) createNewConvo(bobAddress string, title string) ([]byte, error) {
 	// get thread states for me -> bob
-	t1, _, err := ds.getThreadRatchetStates(bobAddress)
+	t1, _, err := storage.getThreadRatchetStates(bobAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -113,21 +114,21 @@ func (em encryptionManager) createNewConvo(bobAddress string, title string) ([]b
 	s2.RATCHET(32)
 
 	// create the conversation with the current thread ratchet value
-	convoId := ds.createConvo(bobAddress, title, s1.Serialize(), s2.Serialize())
+	convoId := storage.createConvo(bobAddress, title, s1.Serialize(), s2.Serialize())
 
 	// ratchet the thread state (following disco spec)
 	threadState.RATCHET(32)
 
 	// update the thread state
-	ds.updateThreadRatchetStates(bobAddress, threadState.Serialize(), nil)
+	storage.updateThreadRatchetStates(bobAddress, threadState.Serialize(), nil)
 
 	// encrypt the title and return it
-	return em.encryptMessage(convoId, bobAddress, title)
+	return e2e.encryptMessage(convoId, bobAddress, title)
 }
 
-func (em encryptionManager) createConvoFromMessage(bobAddress string, ciphertext []byte) error {
+func (e2e encryptionManager) createConvoFromMessage(bobAddress string, ciphertext []byte) error {
 	// get thread states for me -> bob
-	_, t2, err := ds.getThreadRatchetStates(bobAddress)
+	_, t2, err := storage.getThreadRatchetStates(bobAddress)
 	if err != nil {
 		return err
 	}
@@ -146,22 +147,22 @@ func (em encryptionManager) createConvoFromMessage(bobAddress string, ciphertext
 	s2.RATCHET(32)
 
 	// create the conversation with the current thread ratchet value
-	convoId := ds.createConvo(bobAddress, "", s1.Serialize(), s2.Serialize())
+	convoId := storage.createConvo(bobAddress, "", s1.Serialize(), s2.Serialize())
 
 	// decrypt the title
-	title, err := em.decryptMessage(convoId, bobAddress, ciphertext)
+	title, err := e2e.decryptMessage(convoId, bobAddress, ciphertext)
 	if err != nil {
 		return err
 	}
 
 	// update the title
-	ds.updateTitle(convoId, bobAddress, string(title))
+	storage.updateTitle(convoId, bobAddress, string(title))
 
 	// ratchet the thread state (following disco spec)
 	threadState.RATCHET(32)
 
 	// update the thread state
-	ds.updateThreadRatchetStates(bobAddress, nil, threadState.Serialize())
+	storage.updateThreadRatchetStates(bobAddress, nil, threadState.Serialize())
 
 	//
 	return nil

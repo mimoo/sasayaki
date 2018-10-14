@@ -63,7 +63,7 @@ func verifyToken(givenToken string) bool {
 	if err != nil {
 		return false
 	}
-	if subtle.ConstantTimeCompare(ss.token[:], decodedToken) == 1 {
+	if subtle.ConstantTimeCompare(ssyk.token[:], decodedToken) == 1 {
 		return true
 	}
 	return false
@@ -90,7 +90,7 @@ func getApp(w http.ResponseWriter, r *http.Request) {
 	// render the template
 	tmpl := template.Must(template.ParseFiles(indexPageLocation))
 	tmpl.Execute(w, indexData{
-		Identity: ss.keyPair.ExportPublicKey(),
+		Identity: ssyk.keyPair.ExportPublicKey(),
 	})
 
 }
@@ -108,7 +108,7 @@ func getNewMessage(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "You need to enter the correct auth token")
 		return
 	}
-	message, err := hs.getNextMessage()
+	message, err := hub.getNextMessage()
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request convo id"})
 		return
@@ -170,7 +170,7 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 	// TODO: increment the id counter
 
 	// use the proxy to forward the request to the hub
-	success, errMessage := hs.sendMessage(reqId, convoId, req.ToAddress, content)
+	success, errMessage := hub.sendMessage(reqId, convoId, req.ToAddress, content)
 	// return
 	json.NewEncoder(w).Encode(map[string]string{
 		"success": strconv.FormatBool(success),

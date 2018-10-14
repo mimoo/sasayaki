@@ -26,7 +26,7 @@ type sasayakiState struct {
 	token [16]byte // for the webapp
 }
 
-var ss sasayakiState
+var ssyk sasayakiState
 
 func main() {
 	// Welcome + Passphrase
@@ -39,34 +39,34 @@ func main() {
 	}
 
 	// Initialization
-	ss.config, ss.keyPair = initSasayaki(string(passphrase))
-	ss.myAddress = ss.keyPair.ExportPublicKey()
+	ssyk.config, ssyk.keyPair = initSasayaki(string(passphrase))
+	ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
 	initDatabaseManager()
 	initHubManager()
 
 	//
-	fmt.Println("this is your public key:", ss.keyPair.ExportPublicKey())
-	fmt.Println("this is the current config:", ss.config)
+	fmt.Println("this is your public key:", ssyk.keyPair.ExportPublicKey())
+	fmt.Println("this is the current config:", ssyk.config)
 
 	// TODO: Create server at 127.0.0.1:nextOpenPort
 	// TODO: serve a one-page js that removes the authToken and stores it in
 	// TODO:use websockets for messages? (if I want to emulate email I can just use websocket as push notification)
 	// TODO: package the app so that it's launched in the menu bar, not from a terminal
-	_, err = rand.Read(ss.token[:])
+	_, err = rand.Read(ssyk.token[:])
 	if err != nil {
 		panic(err)
 	}
 
-	url := fmt.Sprintf("http://%s/?token=%s", ss.config.addressUI, base64.URLEncoding.EncodeToString(ss.token[:]))
+	url := fmt.Sprintf("http://%s/?token=%s", ssyk.config.addressUI, base64.URLEncoding.EncodeToString(ssyk.token[:]))
 
 	// serve the local webpage
-	//go serveLocalWebPage(ss.config.addressUI)
+	//go serveLocalWebPage(ssyk.config.addressUI)
 
 	// open on browser
 	fmt.Println("To use Sasayaki, open the following url in your favorite browser:", url)
 	//	openbrowser(url)
 
-	serveLocalWebPage(ss.config.addressUI)
+	serveLocalWebPage(ssyk.config.addressUI)
 	//
 	// /get_new_messages (sorted)
 	//
@@ -131,7 +131,7 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<html><body>Hello <code>%s</code><br><a href=#>add someone</a></body></html>", ss.keyPair.ExportPublicKey())
+	fmt.Fprintf(w, "<html><body>Hello <code>%s</code><br><a href=#>add someone</a></body></html>", ssyk.keyPair.ExportPublicKey())
 }
 
 func openbrowser(url string) {

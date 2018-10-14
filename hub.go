@@ -36,27 +36,27 @@ type hubState struct {
 	queryMutex sync.Mutex // one hub query at a time
 }
 
-var hs hubState
+var hub hubState
 
 func initHubManager() error {
 	// if we already have a conn, return
-	if hs.conn != nil {
+	if hub.conn != nil {
 		return nil
 	}
 	// decode the hub public key
-	hubPublicKey, err := hex.DecodeString(ss.config.HubPublicKey)
+	hubPublicKey, err := hex.DecodeString(ssyk.config.HubPublicKey)
 	if err != nil {
 		return err
 	}
 	// config for IK handshake
 	clientConfig := disco.Config{
-		KeyPair:              ss.keyPair,
+		KeyPair:              ssyk.keyPair,
 		HandshakePattern:     disco.Noise_IK,
 		RemoteKey:            hubPublicKey,
 		StaticPublicKeyProof: []byte{},
 	}
 	// dial the Hub and set `conn`
-	hs.conn, err = disco.Dial("tcp", ss.config.HubAddress, &clientConfig)
+	hub.conn, err = disco.Dial("tcp", ssyk.config.HubAddress, &clientConfig)
 	if err != nil {
 		return err
 	}
@@ -66,14 +66,14 @@ func initHubManager() error {
 
 // TODO: of course encrypt the message before sending it :)
 // TODO: needs a cryptoManager? or endToEndManager? or encryptionManager
-func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, string) {
+func (hub *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, string) {
 	// check for arbitrary 1000 bytes of room for headers and protobuff structure
 	if len(content) > 65535-1000 {
 		return false, errors.New("ssyk: message to send is too large")
 	}
 	// one query at a time
-	hs.queryMutex.Lock()
-	defer hs.queryMutex.Unlock()
+	hub.queryMutex.Lock()
+	defer hub.queryMutex.Unlock()
 	// do we have a connection working?
 	if err := initHubManager(); err != nil {
 		return false, err.Error()
@@ -96,23 +96,23 @@ func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []
 	// encode [length(2), data(...)]
 	data = append([]byte{byte(len(data) >> 8), byte(len(data))}, data...)
 	// send
-	if _, err := hs.conn.Write(data); err != nil {
-		hs.conn = nil
+	if _, err := hub.conn.Write(data); err != nil {
+		hub.conn = nil
 		return false, err.Error()
 	}
 	// receive header
 	var header [2]byte
-	n, err := hs.conn.Read(header[:])
+	n, err := hub.conn.Read(header[:])
 	if err != nil || n != 2 {
-		hs.conn = nil
+		hub.conn = nil
 		return false, err.Error()
 	}
 	length := (header[0] << 8) | header[1]
 	// receive
 	rcvBuffer := make([]byte, length)
-	n, err = hs.conn.Read(rcvBuffer)
+	n, err = hub.conn.Read(rcvBuffer)
 	if err != nil {
-		hs.conn = nil
+		hub.conn = nil
 		return false, err.Error()
 	}
 	// unserialize
@@ -124,10 +124,10 @@ func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []
 	return res.GetSuccess(), res.GetError()
 }
 
-func (hs *hubState) getNextMessage() (*s.ResponseMessage, error) {
+func (hub *hubState) getNextMessage() (*s.ResponseMessage, error) {
 	// one query at a time
-	hs.queryMutex.Lock()
-	defer hs.queryMutex.Unlock()
+	hub.queryMutex.Lock()
+	defer hub.queryMutex.Unlock()
 	// do we have a connection?
 	initHubManager()
 	// create query
@@ -140,23 +140,23 @@ func (hs *hubState) getNextMessage() (*s.ResponseMessage, error) {
 	// encode [length(2), data(...)]
 	data = append([]byte{byte(len(data) >> 8), byte(len(data))}, data...)
 	// send
-	if _, err = hs.conn.Write(data); err != nil {
-		hs.conn = nil
+	if _, err = hub.conn.Write(data); err != nil {
+		hub.conn = nil
 		return nil, err
 	}
 	// receive header
 	var header [2]byte
-	n, err := hs.conn.Read(header[:])
+	n, err := hub.conn.Read(header[:])
 	if err != nil || n != 2 {
-		hs.conn = nil
+		hub.conn = nil
 		return nil, err
 	}
 	length := (header[0] << 8) | header[1]
 	// receive
 	rcvBuffer := make([]byte, length)
-	n, err = hs.conn.Read(rcvBuffer)
+	n, err = hub.conn.Read(rcvBuffer)
 	if err != nil {
-		hs.conn = nil
+		hub.conn = nil
 		return nil, err
 	}
 	// unserialize

@@ -61,7 +61,7 @@ session:
 	for {
 		// receive header
 		var header [2]byte
-		n, err := hs.conn.Read(header[:])
+		n, err := conn.Read(header[:])
 		if err != nil || n != 2 {
 			log.Println("can't read header: ", err)
 			break session
@@ -70,7 +70,7 @@ session:
 		// receive
 		buffer := make([]byte, length)
 		// read socket
-		n, err := conn.Read(buffer)
+		n, err = conn.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
 				log.Println("rpc server cannot read client request:", err)

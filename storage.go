@@ -53,12 +53,12 @@ type databaseState struct {
 	queryMutex sync.Mutex // one sql query at a time
 }
 
-var ds databaseState
+var storage databaseState
 
 func initDatabaseManager() {
 	location := filepath.Join(sasayakiFolder(), "database.db")
 	var err error
-	ds.db, err = sql.Open("sqlite3", location)
+	storage.db, err = sql.Open("sqlite3", location)
 	if err != nil {
 		panic(err)
 	}
@@ -69,7 +69,7 @@ func initDatabaseManager() {
 	CREATE TABLE IF NOT EXISTS conversations (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
 	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER, date TIMESTAMP, sender TEXT, message BLOB);
 	`
-	_, err = ds.db.Exec(createStatement)
+	_, err = storage.db.Exec(createStatement)
 	if err != nil {
 		panic(err)
 	}
@@ -77,23 +77,23 @@ func initDatabaseManager() {
 	// defer db.Close() // we never close the db
 }
 
-func (ds *databaseState) getMessages() {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) getMessages() {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
 	selectStatement := "SELECT * FROM conversations;"
-	_, err := ds.db.Exec(selectStatement)
+	_, err := storage.db.Exec(selectStatement)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (ds *databaseState) getThreadRatchetStates(bobAddress string) ([]byte, []byte, error) {
+func (storage *databaseState) getThreadRatchetStates(bobAddress string) ([]byte, []byte, error) {
 	//
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// query
-	stmt, err := ds.db.Prepare("SELECT state, c1, c2 FROM contacts WHERE publickey = ?;")
+	stmt, err := storage.db.Prepare("SELECT state, c1, c2 FROM contacts WHERE publickey = ?;")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,11 +119,11 @@ func (ds *databaseState) getThreadRatchetStates(bobAddress string) ([]byte, []by
 // getSessionKeys finds the session keys for chatting with Bob {convoId, BobAddress}
 //
 // if it doesn't find session keys for a  tuple
-func (ds *databaseState) getSessionKeys(convoId uint64, bobAddress string) ([]byte, []byte, error) {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) getSessionKeys(convoId uint64, bobAddress string) ([]byte, []byte, error) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
-	stmt, err := ds.db.Prepare("SELECT state, c1, c2 FROM conversations WHERE id=? AND publickey=?")
+	stmt, err := storage.db.Prepare("SELECT state, c1, c2 FROM conversations WHERE id=? AND publickey=?")
 	if err != nil {
 		panic(err)
 	}
@@ -145,9 +145,9 @@ func (ds *databaseState) getSessionKeys(convoId uint64, bobAddress string) ([]by
 }
 
 // updateSessionKeys will crash if the database query doesn't work
-func (ds *databaseState) updateSessionKeys(convoId uint64, bobAddress string, c1, c2 []byte) {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) updateSessionKeys(convoId uint64, bobAddress string, c1, c2 []byte) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
 	if c1 == nil && c2 == nil {
 		panic("ssyk: at least one session key must be defined in order to call updateSessionKeys")
@@ -159,7 +159,7 @@ func (ds *databaseState) updateSessionKeys(convoId uint64, bobAddress string, c1
 		sessionkey = c2
 		query := "UPDATE conversations SET c2=? WHERE id=? AND publickey=?"
 	}
-	stmt, err := ds.db.Prepare(query)
+	stmt, err := storage.db.Prepare(query)
 	if err != nil {
 		panic(err)
 	}
@@ -169,12 +169,12 @@ func (ds *databaseState) updateSessionKeys(convoId uint64, bobAddress string, c1
 	}
 }
 
-func (ds *databaseState) getLastConvoId() uint64 {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) getLastConvoId() uint64 {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
 	selectStatement := "SELECT id FROM conversations ORDER BY id DESC LIMIT 1;"
-	rows, err := ds.db.Query(selectStatement)
+	rows, err := storage.db.Query(selectStatement)
 	if err != nil {
 		panic(err)
 	}
@@ -190,12 +190,12 @@ func (ds *databaseState) getLastConvoId() uint64 {
 	return lastConvoId
 }
 
-func (ds *databaseState) createConvo(bobAddress, title string, sessionkey1, sessionkey2 []byte) uint64 {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) createConvo(bobAddress, title string, sessionkey1, sessionkey2 []byte) uint64 {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
 	// (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	stmt, err := ds.db.Prepare("INSERT INTO conversations VALUES(NULL, ?, ?, ?, ?, ?, ?);")
+	stmt, err := storage.db.Prepare("INSERT INTO conversations VALUES(NULL, ?, ?, ?, ?, ?, ?);")
 	if err != nil {
 		panic(err)
 	}
@@ -205,13 +205,12 @@ func (ds *databaseState) createConvo(bobAddress, title string, sessionkey1, sess
 	}
 	// return convoId created
 	convoId, _ := res.LastInsertId()
-	return convoId // TODO: returns a int64, does that mean that it's the maximum value that I can store in sqlite?
-	// TODO: I can probably have a uint32 as value anyway, nobody is going to reach that
+	return uint64(convoId)
 }
 
-func (ds *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
-	ds.queryMutex.Lock()
-	defer ds.queryMutex.Unlock()
+func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
 	if ts1 == nil && ts2 == nil {
 		panic("ssyk: at least one session key must be defined in order to call updateSessionKeys")
@@ -223,7 +222,7 @@ func (ds *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 [
 		sessionkey = c2
 		query := "UPDATE contacts SET c2=? WHERE publickey=?"
 	}
-	stmt, err := ds.db.Prepare(query)
+	stmt, err := storage.db.Prepare(query)
 	if err != nil {
 		panic(err)
 	}
@@ -233,6 +232,6 @@ func (ds *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 [
 	}
 }
 
-func (ds *databaseState) updateTitle(convoId uint64, bobAddress, title string) {
+func (storage *databaseState) updateTitle(convoId uint64, bobAddress, title string) {
 
 }
