@@ -12,7 +12,7 @@ package main
 
 import (
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"net"
 	"sync"
 
@@ -67,6 +67,10 @@ func initHubManager() error {
 // TODO: of course encrypt the message before sending it :)
 // TODO: needs a cryptoManager? or endToEndManager? or encryptionManager
 func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, string) {
+	// check for arbitrary 1000 bytes of room for headers and protobuff structure
+	if len(content) > 65535-1000 {
+		return false, errors.New("ssyk: message to send is too large")
+	}
 	// one query at a time
 	hs.queryMutex.Lock()
 	defer hs.queryMutex.Unlock()
@@ -89,14 +93,24 @@ func (hs *hubState) sendMessage(id, convoId uint64, toAddress string, content []
 	if err != nil {
 		return false, err.Error()
 	}
-	fmt.Println("sending", req)
+	// encode [length(2), data(...)]
+	data = append([]byte{byte(len(data) >> 8), byte(len(data))}, data...)
 	// send
 	if _, err := hs.conn.Write(data); err != nil {
 		hs.conn = nil
 		return false, err.Error()
 	}
+	// receive header
+	var header [2]byte
+	n, err := hs.conn.Read(header[:])
+	if err != nil || n != 2 {
+		hs.conn = nil
+		return false, err.Error()
+	}
+	length := (header[0] << 8) | header[1]
 	// receive
-	n, err := hs.conn.Read(rcvBuffer[:])
+	rcvBuffer := make([]byte, length)
+	n, err = hs.conn.Read(rcvBuffer)
 	if err != nil {
 		hs.conn = nil
 		return false, err.Error()
@@ -123,13 +137,24 @@ func (hs *hubState) getNextMessage() (*s.ResponseMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	// encode [length(2), data(...)]
+	data = append([]byte{byte(len(data) >> 8), byte(len(data))}, data...)
 	// send
 	if _, err = hs.conn.Write(data); err != nil {
 		hs.conn = nil
 		return nil, err
 	}
+	// receive header
+	var header [2]byte
+	n, err := hs.conn.Read(header[:])
+	if err != nil || n != 2 {
+		hs.conn = nil
+		return nil, err
+	}
+	length := (header[0] << 8) | header[1]
 	// receive
-	n, err := hs.conn.Read(rcvBuffer[:])
+	rcvBuffer := make([]byte, length)
+	n, err = hs.conn.Read(rcvBuffer)
 	if err != nil {
 		hs.conn = nil
 		return nil, err

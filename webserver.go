@@ -42,6 +42,8 @@ const (
 	messageMaxChars = 10000
 )
 
+// serveLocalWebPage is the main function serving the single-page javascript webapp
+// and the different JSON APIs
 func serveLocalWebPage(localAddress string) {
 	r := mux.NewRouter()
 	r.HandleFunc("/", getApp).Methods("GET")

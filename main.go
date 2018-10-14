@@ -19,8 +19,9 @@ import (
 type sasayakiState struct {
 	conn net.Conn
 
-	config  configuration
-	keyPair *disco.KeyPair
+	config    configuration
+	keyPair   *disco.KeyPair // my long-term static keypair
+	myAddress string         // public key in hex form
 
 	token [16]byte // for the webapp
 }
@@ -39,6 +40,7 @@ func main() {
 
 	// Initialization
 	ss.config, ss.keyPair = initSasayaki(string(passphrase))
+	ss.myAddress = ss.keyPair.ExportPublicKey()
 	initDatabaseManager()
 	initHubManager()
 

@@ -14,3 +14,5 @@ Sasayaki or NCC Group Messenger was designed as an end-to-end encrypted messagin
     - I could do a RATCHET after each message in a thread (?)
 * no protection against denial of service: a hub who decides to stop relaying messages is not in scope
 * no gossip protocols, so if the server refuses to tell you that someone's key was revoked... that's bad
+
+overall: the goal is to achieve something better than PGP email encryption inside of a company. Not to achieve maximum paranoid settings which are mostly useless

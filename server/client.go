@@ -56,15 +56,19 @@ func sasayakiServer(listener *disco.Listener) {
 }
 
 func (cc client) handleClient(conn net.Conn) {
-	//
-	// TODO: is it necessary to create this huge buffer here?
-	// don't proto have some functions to do that?
-	// worst case perhaps I should use a pool of buffer (see crypto/tls' block)
-	//
-	buffer := make([]byte, 10000)
 
 session:
 	for {
+		// receive header
+		var header [2]byte
+		n, err := hs.conn.Read(header[:])
+		if err != nil || n != 2 {
+			log.Println("can't read header: ", err)
+			break session
+		}
+		length := (header[0] << 8) | header[1]
+		// receive
+		buffer := make([]byte, length)
 		// read socket
 		n, err := conn.Read(buffer)
 		if err != nil {
