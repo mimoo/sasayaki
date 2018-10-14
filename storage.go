@@ -157,7 +157,7 @@ func (storage *databaseState) updateSessionKeys(convoId uint64, bobAddress strin
 	query := "UPDATE conversations SET c1=? WHERE id=? AND publickey=?"
 	if c1 == nil {
 		sessionkey = c2
-		query := "UPDATE conversations SET c2=? WHERE id=? AND publickey=?"
+		query = "UPDATE conversations SET c2=? WHERE id=? AND publickey=?"
 	}
 	stmt, err := storage.db.Prepare(query)
 	if err != nil {
@@ -208,6 +208,7 @@ func (storage *databaseState) createConvo(bobAddress, title string, sessionkey1,
 	return uint64(convoId)
 }
 
+// updateThreadRatchetStates takes two serialized thread states and update the bob's contact with them
 func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
@@ -218,9 +219,9 @@ func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, 
 	// c1 by default
 	threadState := ts1
 	query := "UPDATE contacts SET c1=? WHERE publickey=?"
-	if c1 == nil {
-		sessionkey = c2
-		query := "UPDATE contacts SET c2=? WHERE publickey=?"
+	if threadState == nil {
+		threadState = ts2
+		query = "UPDATE contacts SET c2=? WHERE publickey=?"
 	}
 	stmt, err := storage.db.Prepare(query)
 	if err != nil {
@@ -233,5 +234,16 @@ func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, 
 }
 
 func (storage *databaseState) updateTitle(convoId uint64, bobAddress, title string) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 
+	stmt, err := storage.db.Prepare("UPDATE conversations SET title=? WHERE id=? AND publickey=?")
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = stmt.Exec(title, convoId, bobAddress)
+	if err != nil {
+		panic(err)
+	}
 }

@@ -78,6 +78,7 @@ session:
 			break session // always break on error
 		}
 		log.Println("received message from client")
+
 		// parse protobuff request
 		request := &s.Request{}
 		err = proto.Unmarshal(buffer[:n], request)
@@ -85,22 +86,37 @@ session:
 			log.Println("unmarshaling error: ", err)
 			break session
 		}
+
 		// what kind of request?
+		var responseData []byte
+
 		switch request.GetRequestType() {
 		case s.Request_GetNextMessage:
 			log.Println("client is requesting to get next message")
-			if err := cc.handleGetNextMessage(conn, request); err != nil {
+			responseData, err = cc.handleGetNextMessage(request)
+			if err != nil {
 				log.Println("client session closing:", err)
 				break session
 			}
 		case s.Request_SendMessage:
 			log.Println("client is requesting to send a message")
-			if err := cc.handleSendMessage(conn, request); err != nil {
+			responseData, err = cc.handleSendMessage(request)
+			if err != nil {
 				log.Println("client session closing:", err)
 				break session
 			}
 		default:
 			log.Println("request cannot be parsed yet")
+			break session
+		}
+
+		// handle response, encode [length(2), data(...)]
+		responseData = append([]byte{byte(len(responseData) >> 8), byte(len(responseData))}, responseData...)
+
+		// send it
+		_, err = conn.Write(responseData)
+		if err != nil {
+			log.Println("client session closing:", err)
 			break session
 		}
 
@@ -111,22 +127,17 @@ session:
 }
 
 // success sends a failure or success proto message. Returns an error if it can't write to the conn
-func success(conn net.Conn, success bool, message string) error {
+func success(success bool, message string) ([]byte, error) {
 	res := &s.ResponseSuccess{
 		Success: success,
 		Error:   message,
 	}
-	data, err := proto.Marshal(res)
-	if err != nil {
-		panic(err)
-	}
-	_, err = conn.Write(data)
-	return err
+	return proto.Marshal(res)
 }
 
 // handleSendMessage attempts to send the message. Returns an error if it doesn't work
 // because of conn. Otherwise send a failure proto message
-func (cc client) handleSendMessage(conn net.Conn, req *s.Request) error {
+func (cc client) handleSendMessage(req *s.Request) ([]byte, error) {
 	// parse request
 	id := req.Message.GetId()
 	convoId := req.Message.GetConvoId()
@@ -135,10 +146,10 @@ func (cc client) handleSendMessage(conn net.Conn, req *s.Request) error {
 	// checking fields
 	// TODO: test if id or convo id = 0 ? (not set)
 	if len(toAddress) != 64 || content == nil || len(content) > messageMaxChars {
-		return success(conn, false, "fields are not correctly formated")
+		return success(false, "fields are not correctly formated")
 	}
 	if !regexHex.MatchString(toAddress) {
-		return success(conn, false, "the recipient address is not [a-z0-9]")
+		return success(false, "the recipient address is not [a-z0-9]")
 	}
 	toAddress = strings.ToLower(toAddress)
 	// handle the message (TODO: do it w/ a database)
@@ -153,10 +164,10 @@ func (cc client) handleSendMessage(conn net.Conn, req *s.Request) error {
 	mm.queryMutex.Unlock()
 
 	// write success or not
-	return success(conn, true, "")
+	return success(true, "")
 }
 
-func (cc client) handleGetNextMessage(conn net.Conn, req *s.Request) error {
+func (cc client) handleGetNextMessage(req *s.Request) ([]byte, error) {
 	// empty response for now
 	res := &s.ResponseMessage{}
 	// lock memory
@@ -182,7 +193,6 @@ func (cc client) handleGetNextMessage(conn net.Conn, req *s.Request) error {
 	if err != nil {
 		panic(err) // TODO: can this panic be triggered maliciously?
 	}
-	// send
-	_, err = conn.Write(data)
-	return err
+	//
+	return data, err
 }

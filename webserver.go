@@ -170,12 +170,16 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 	// TODO: increment the id counter
 
 	// use the proxy to forward the request to the hub
-	success, errMessage := hub.sendMessage(reqId, convoId, req.ToAddress, content)
-	// return
-	json.NewEncoder(w).Encode(map[string]string{
-		"success": strconv.FormatBool(success),
-		"error":   errMessage,
-	})
+	if err := hub.sendMessage(reqId, convoId, req.ToAddress, content); err != nil {
+		json.NewEncoder(w).Encode(map[string]string{
+			"success": "false",
+			"error":   err.Error(),
+		})
+	} else {
+		json.NewEncoder(w).Encode(map[string]string{
+			"success": "true",
+		})
+	}
 }
 
 /*

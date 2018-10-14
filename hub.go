@@ -66,17 +66,17 @@ func initHubManager() error {
 
 // TODO: of course encrypt the message before sending it :)
 // TODO: needs a cryptoManager? or endToEndManager? or encryptionManager
-func (hub *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) (bool, string) {
+func (hub *hubState) sendMessage(id, convoId uint64, toAddress string, content []byte) error {
 	// check for arbitrary 1000 bytes of room for headers and protobuff structure
 	if len(content) > 65535-1000 {
-		return false, errors.New("ssyk: message to send is too large")
+		return errors.New("ssyk: message to send is too large")
 	}
 	// one query at a time
 	hub.queryMutex.Lock()
 	defer hub.queryMutex.Unlock()
 	// do we have a connection working?
 	if err := initHubManager(); err != nil {
-		return false, err.Error()
+		return err
 	}
 	// create query
 	req := &s.Request{
@@ -91,21 +91,21 @@ func (hub *hubState) sendMessage(id, convoId uint64, toAddress string, content [
 	// serialize
 	data, err := proto.Marshal(req)
 	if err != nil {
-		return false, err.Error()
+		return err
 	}
 	// encode [length(2), data(...)]
 	data = append([]byte{byte(len(data) >> 8), byte(len(data))}, data...)
 	// send
 	if _, err := hub.conn.Write(data); err != nil {
 		hub.conn = nil
-		return false, err.Error()
+		return err
 	}
 	// receive header
 	var header [2]byte
 	n, err := hub.conn.Read(header[:])
 	if err != nil || n != 2 {
 		hub.conn = nil
-		return false, err.Error()
+		return err
 	}
 	length := (header[0] << 8) | header[1]
 	// receive
@@ -113,15 +113,20 @@ func (hub *hubState) sendMessage(id, convoId uint64, toAddress string, content [
 	n, err = hub.conn.Read(rcvBuffer)
 	if err != nil {
 		hub.conn = nil
-		return false, err.Error()
+		return err
 	}
 	// unserialize
 	res := &s.ResponseSuccess{}
 	if err = proto.Unmarshal(rcvBuffer[:n], res); err != nil {
-		return false, err.Error()
+		return err
 	}
-	// return
-	return res.GetSuccess(), res.GetError()
+
+	// return on failure
+	if !res.GetSuccess() {
+		return errors.New(res.GetError())
+	}
+
+	return nil
 }
 
 func (hub *hubState) getNextMessage() (*s.ResponseMessage, error) {
