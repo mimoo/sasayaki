@@ -23,6 +23,8 @@ type sasayakiState struct {
 	myAddress string         // public key in hex form
 
 	initialized bool // useful for webUI
+
+	debug bool // debug stuff
 }
 
 var ssyk sasayakiState
@@ -30,6 +32,10 @@ var ssyk sasayakiState
 // getNextMessage retrieves and decrypt a new message from the hub
 // everything message order is kept by the server
 func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
+	// initialized?
+	if !ssyk.initialized {
+		return errors.New("ssyk: Sasayaki has not been initialized")
+	}
 	// obtain next message from hub
 	encryptedMsg, err := hub.getNextMessage()
 	if err != nil {
@@ -76,6 +82,10 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 // sendMessage can be used to send a message, or create a new thread
 // in the case of a new thread, convoId must be "0" and the content must be the thread's title
 func (ss sasayakiState) sendMessage(msg *plaintextMsg) error {
+	// initialized?
+	if !ssyk.initialized {
+		return errors.New("ssyk: Sasayaki has not been initialized")
+	}
 	// is it a new thread?
 	if msg.ConvoId == "0" {
 		// generate convoId

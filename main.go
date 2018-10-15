@@ -17,6 +17,7 @@ func main() {
 	// flags
 	CLIenabled := flag.Bool("cli", false, "run Sasayaki in the terminal")
 	addressUI := flag.String("port", "7474", "the address port of the web UI running on localhost (default 7474)")
+	debug := flag.Bool("debug", false, "debug")
 	flag.Parse()
 
 	if *CLIenabled {
@@ -31,37 +32,47 @@ func main() {
 		var config configuration
 		config, ssyk.keyPair = initSasayaki(string(passphrase))
 		ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
+		ssyk.debug = *debug
 
 		// init database
 		initDatabaseManager()
 
 		// if we don't have a hub address, we ask
+		var updateCfg bool
 		if config.HubAddress == "" {
 			fmt.Println("What is the Hub address?")
-			if _, err := fmt.Scanf("%s", config.HubAddress); err != nil {
+			if _, err := fmt.Scanf("%s", &(config.HubAddress)); err != nil {
 				panic(err)
 			}
+			updateCfg = true
 		}
 
 		// if we don't have a hub public key, we ask
 		if config.HubPublicKey == "" {
 			fmt.Println("What is the Hub public key?")
-			if n, err := fmt.Scanf("%s", config.HubPublicKey); err != nil || n != 64 {
+			if _, err := fmt.Scanf("%s", &(config.HubPublicKey)); err != nil {
 				panic(err)
 			}
+			updateCfg = true
 		}
 
-		// TODO: save configuration if there are changes
-
-		// TODO: is this useful?
-		ssyk.initialized = true
+		// save configuration if there are changes
+		if updateCfg {
+			config.updateConfiguration()
+		}
 
 		// init hub
 		hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
-		if err != nil {
-			panic(err)
+		if err != nil || len(hubPublicKey) != 32 {
+			fmt.Println("cannot parse the hub's public key. Please re-run Sasayaki")
+			config.resetConfiguration()
+			return
 		}
+
 		initHubManager(config.HubAddress, hubPublicKey)
+
+		// TODO: is this useful?
+		ssyk.initialized = true
 
 		// Information
 		fmt.Println("this is your public key:", ssyk.keyPair.ExportPublicKey())

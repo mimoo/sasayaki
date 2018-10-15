@@ -68,7 +68,10 @@ func serveLocalWebPage(localAddress string) {
 	url := fmt.Sprintf("http://%s/?token=%s", localAddress, base64.URLEncoding.EncodeToString(web.token[:]))
 	// open on browser
 	fmt.Println("To use Sasayaki, open the following url in your favorite browser:", url)
-	openbrowser(url) // TODO: should we really open this before starting the server?
+
+	if !ssyk.debug {
+		openbrowser(url) // TODO: should we really open this before starting the server?
+	}
 
 	// listen and serve
 	panic(http.ListenAndServe(localAddress, r))

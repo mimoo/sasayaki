@@ -30,6 +30,7 @@ type configuration struct {
 }
 
 // read json file
+// TODO: should I encrypt stuff in there?
 func initConfiguration() configuration {
 	home := sasayakiFolder()
 	configFile := filepath.Join(home, "configuration.json")
@@ -48,17 +49,41 @@ func initConfiguration() configuration {
 	cfg := configuration{}
 	json.Unmarshal(configJSON, &cfg)
 
-	// TODO: remove this default
-	if len(cfg.HubPublicKey) == 0 {
-		cfg.HubPublicKey = "1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21"
-	}
-	// TODO: remove this default
-	if cfg.HubAddress == "" {
-		cfg.HubAddress = "127.0.0.1:7474"
+	if ssyk.debug {
+		if len(cfg.HubPublicKey) == 0 {
+			cfg.HubPublicKey = "1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21"
+		}
+		if cfg.HubAddress == "" {
+			cfg.HubAddress = "127.0.0.1:7474"
+		}
 	}
 
 	//
 	return cfg
+}
+
+// write json file
+func (cfg configuration) updateConfiguration() {
+	home := sasayakiFolder()
+	configFile := filepath.Join(home, "configuration.json")
+	// this will create the file if it doesn't exist
+	f, err := os.OpenFile(configFile, os.O_WRONLY, 0600)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := json.NewEncoder(f).Encode(cfg); err != nil {
+		panic(err)
+	}
+
+	f.Close()
+}
+
+// reset json file
+func (cfg configuration) resetConfiguration() {
+	home := sasayakiFolder()
+	configFile := filepath.Join(home, "configuration.json")
+	os.Remove(configFile)
 }
 
 // init ~/.sasayaki folder
