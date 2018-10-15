@@ -27,6 +27,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -51,6 +52,22 @@ type webState struct {
 
 var web webState
 
+//
+// JSON APIs
+//
+
+// send_message
+type sendMessageReq struct {
+	ConvoId   string `json:"convo_id"`
+	ToAddress string `json:"to_address"`
+	Content   string `json:"content"`
+}
+
+// set_passphrase
+type passphraseRequest struct {
+	Passphrase string `json:"passphrase"`
+}
+
 // serveLocalWebPage is the main function serving the single-page javascript webapp
 // and the different JSON APIs
 func serveLocalWebPage(localAddress string) {
@@ -59,6 +76,9 @@ func serveLocalWebPage(localAddress string) {
 	r.HandleFunc("/", web.getApp).Methods("GET")
 	r.HandleFunc("/get_new_message", web.getNewMessage).Methods("GET")
 	r.HandleFunc("/send_message", web.sendMessage).Methods("POST")
+
+	r.HandleFunc("/set_passphrase", web.setPassphrase).Methods("POST")
+	r.HandleFunc("/set_configuration", web.setConfiguration).Methods("POST")
 
 	// token
 	if _, err := rand.Read(web.token[:]); err != nil {
@@ -114,7 +134,7 @@ func (web webState) getApp(w http.ResponseWriter, r *http.Request) {
 	// render the template
 	tmpl := template.Must(template.ParseFiles(indexPageLocation))
 	tmpl.Execute(w, indexData{
-		Identity: ssyk.keyPair.ExportPublicKey(),
+	//		Identity: ssyk.keyPair.ExportPublicKey(), // TODO: can't display that as we haven't initliazed
 	})
 
 }
@@ -144,14 +164,6 @@ func (web webState) getNewMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // http post http://127.0.0.1:7473/send_message Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ== id=1 convo_id=5 to=pubkey
-
-type sendMessageReq struct {
-	Id        string `json:"id"` // 64-bit?
-	ConvoId   string `json:"convo_id"`
-	ToAddress string `json:"to_address"`
-	Content   string `json:"content"`
-}
-
 func (web webState) sendMessage(w http.ResponseWriter, r *http.Request) {
 	// verify auth token
 	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
@@ -185,4 +197,64 @@ func (web webState) sendMessage(w http.ResponseWriter, r *http.Request) {
 			"success": "true",
 		})
 	}
+}
+
+func (web webState) setPassphrase(w http.ResponseWriter, r *http.Request) {
+	// parse request
+	decoder := json.NewDecoder(r.Body)
+	var req passphraseRequest
+	err := decoder.Decode(&req)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
+		return
+	}
+
+	// init
+	var config configuration
+	config, ssyk.keyPair = initSasayaki(string(req.Passphrase))
+	ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
+
+	// init database
+	initDatabaseManager()
+
+	// init hub
+	hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
+	if err != nil || len(hubPublicKey) != 32 {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
+		return
+	}
+
+	initHubManager(config.HubAddress, hubPublicKey)
+
+	// done
+	ssyk.initialized = true
+
+	//
+	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
+}
+
+func (web webState) setConfiguration(w http.ResponseWriter, r *http.Request) {
+	// parse request
+	decoder := json.NewDecoder(r.Body)
+	var config configuration
+	err := decoder.Decode(&config)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
+		return
+	}
+
+	// init hub
+	hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
+	if err != nil || len(hubPublicKey) != 32 {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
+		return
+	}
+
+	initHubManager(config.HubAddress, hubPublicKey)
+
+	// save configuration
+	config.updateConfiguration()
+
+	//
+	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
 }

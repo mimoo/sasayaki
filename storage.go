@@ -54,6 +54,7 @@ type databaseState struct {
 
 var storage databaseState
 
+// TODO: protect database with encryption under our passphrase
 func initDatabaseManager() {
 	location := filepath.Join(sasayakiFolder(), "database.db")
 	var err error

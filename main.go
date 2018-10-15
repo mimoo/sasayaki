@@ -28,6 +28,10 @@ func main() {
 			panic(err)
 		}
 
+		// TODO: ideally, we would use the Hub as an OPRF here, so that our passphrase is not too weak
+		// (see PASS, OPAQUE, SPHINX, MAKWA, etc.)
+		// + rate-limit on the server-side
+
 		// init ~/.sasayaki folder and fetch config + keypair
 		var config configuration
 		config, ssyk.keyPair = initSasayaki(string(passphrase))
@@ -80,9 +84,6 @@ func main() {
 
 		//
 	} else {
-
-		fmt.Println("not implemented yet")
-		return
 
 		// set address for the web UI
 		addressUI := "127.0.0.1:" + *addressUI

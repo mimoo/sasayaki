@@ -34,7 +34,7 @@ var ssyk sasayakiState
 func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	// initialized?
 	if !ssyk.initialized {
-		return errors.New("ssyk: Sasayaki has not been initialized")
+		return nil, errors.New("ssyk: Sasayaki has not been initialized")
 	}
 	// obtain next message from hub
 	encryptedMsg, err := hub.getNextMessage()
