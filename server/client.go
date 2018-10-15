@@ -183,8 +183,6 @@ func (cc client) handleGetNextMessage(req *s.Request) ([]byte, error) {
 		res.Id = message.id
 		res.ConvoId = message.convoId
 		res.Content = message.content
-	} else {
-		res.FromAddress = "empty"
 	}
 	// unlock memory
 	mm.queryMutex.Unlock()

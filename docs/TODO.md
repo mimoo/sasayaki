@@ -1,5 +1,7 @@
 # MVP
 
+1. make sure parsing of protobuf structure is fine
+2. create tests (I think I need to get rid of global vars for tests)
 1. create json APIs 
 1. create tests! can I do a temp database?
     - creating tests will
