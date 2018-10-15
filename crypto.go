@@ -21,7 +21,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 
@@ -58,14 +57,18 @@ func (e2e encryptionManager) encryptMessage(msg *plaintextMsg) (*s.Request_Messa
 	s1 := strobe.RecoverState(c1)
 	// data to authenticate [convoId(8), sendPubKey(32), recvPubKey(32)]
 	// TODO: what else should we authenticate here?
-	toAuthenticate := make([]byte, 8+32+32)
-	binary.BigEndian.PutUint64(toAuthenticate[:8], msg.ConvoId)
+	toAuthenticate := make([]byte, 16+32+32)
+	convoId, err := hex.DecodeString(msg.ConvoId)
+	if err != nil {
+		return nil, err
+	}
 	bobPubKey, err := hex.DecodeString(msg.ToAddress)
 	if err != nil {
 		return nil, err
 	}
-	copy(toAuthenticate[8:], ssyk.keyPair.PublicKey[:])
-	copy(toAuthenticate[40:], bobPubKey)
+	copy(toAuthenticate[0:16], convoId)
+	copy(toAuthenticate[16:16+32], ssyk.keyPair.PublicKey[:])
+	copy(toAuthenticate[16+32:16+32+32], bobPubKey)
 	// encrypt message
 	ciphertext := s1.Send_AEAD([]byte(msg.Content), toAuthenticate)
 	// store new state
@@ -73,7 +76,6 @@ func (e2e encryptionManager) encryptMessage(msg *plaintextMsg) (*s.Request_Messa
 	// create return value
 	encryptedMessage := &s.Request_Message{
 		ToAddress: msg.ToAddress,
-		Id:        msg.Id,
 		ConvoId:   msg.ConvoId,
 		Content:   ciphertext,
 	}
@@ -93,15 +95,19 @@ func (e2e encryptionManager) decryptMessage(encryptedMsg *s.ResponseMessage) (*p
 		return nil, err
 	}
 	// data to authenticate [convoId(8), sendPubKey(32), recvPubKey(32)]
-	// TODO: what else should we authenticate here?
-	toAuthenticate := make([]byte, 8+32+32)
-	binary.BigEndian.PutUint64(toAuthenticate[:8], encryptedMsg.GetConvoId())
+	toAuthenticate := make([]byte, 16+32+32)
+	convoId, err := hex.DecodeString(encryptedMsg.GetConvoId())
+	if err != nil {
+		return nil, err
+	}
 	bobPubKey, err := hex.DecodeString(encryptedMsg.GetFromAddress())
 	if err != nil {
 		return nil, err
 	}
-	copy(toAuthenticate[8:], bobPubKey)
-	copy(toAuthenticate[40:], ssyk.keyPair.PublicKey[:])
+	copy(toAuthenticate[0:16], convoId)
+	copy(toAuthenticate[16:16+32], bobPubKey)
+	copy(toAuthenticate[16+32:16+32+32], ssyk.keyPair.PublicKey[:])
+
 	// decrypt message
 	s2 := strobe.RecoverState(c2)
 	plaintext, ok := s2.Recv_AEAD(encryptedMsg.GetContent(), toAuthenticate)
@@ -113,7 +119,6 @@ func (e2e encryptionManager) decryptMessage(encryptedMsg *s.ResponseMessage) (*p
 	storage.updateSessionKeys(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), nil, s2.Serialize())
 	// return plaintext
 	msg := &plaintextMsg{
-		Id:          encryptedMsg.GetId(),
 		ConvoId:     encryptedMsg.GetConvoId(),
 		FromAddress: encryptedMsg.GetFromAddress(),
 		ToAddress:   ssyk.myAddress,
@@ -143,9 +148,8 @@ func (e2e encryptionManager) createNewConvo(msg *plaintextMsg) (*s.Request_Messa
 	s2.AD(true, []byte("responder"))
 	s2.RATCHET(32)
 
-	// create the conversation with the current thread ratchet value
-	convoId := ds.getLastConvoId() + 1
-	storage.createConvo(convoId, msg.ToAddress, msg.Content, s1.Serialize(), s2.Serialize())
+	// create the conversation with the current thread ratchet value and a random convoId
+	storage.createConvo(msg.ConvoId, msg.ToAddress, msg.Content, s1.Serialize(), s2.Serialize())
 
 	// ratchet the thread state (following disco spec)
 	threadState.RATCHET(32)
@@ -176,19 +180,6 @@ func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMess
 
 	s2.AD(true, []byte("responder"))
 	s2.RATCHET(32)
-
-	// check if the convoId is valid
-	convoId := ds.getLastConvoId() + 1       // what we see
-	if convoId > encryptedMsg.GetConvoId() { // shouldn't be higher
-		return errors.New("ssyk: convoId seems to be stuck in the past")
-		// TODO: this should be a fatal error with the contact
-		// at this point the best course of action seems to be: send an alert msg to the contact telling him impossible to read
-		// wait... this can happen if we create a thread without having collected current threads...
-		// maybe msg being sent in one direction should have a prefix? mmmm....
-		// better, conversations have a direction
-		// so a conversation is a tuple {myAddress, BobAddress, convoId, direction}
-		// no... a 128-bit random value is better (GUID)
-	}
 
 	// create the conversation with the current thread ratchet value
 	storage.createConvo(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), "", s1.Serialize(), s2.Serialize())

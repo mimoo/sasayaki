@@ -11,8 +11,7 @@ type memory struct {
 
 type Message struct {
 	fromAddress string
-	id          uint64
-	convoId     uint64
+	convoId     string
 	content     []byte
 }
 

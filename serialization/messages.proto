@@ -15,9 +15,8 @@ message Request {
 
 	message Message {
 	  string toAddress = 1;
-	  uint64 id = 2;
-	  uint64 convo_id = 3;
-	  bytes content = 4;
+	  string convo_id = 2;
+	  bytes content = 3;
 	}
 
 	RequestType requestType = 1;
@@ -33,7 +32,6 @@ message ResponseSuccess {
 // Response with a message
 message ResponseMessage {
   string fromAddress = 1;
-  uint64 id = 2;
-  uint64 convo_id = 3;
-  bytes content = 4;
+  string convo_id = 2;
+  bytes content = 3;
 }

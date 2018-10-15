@@ -46,18 +46,21 @@ func main() {
 		// if we don't have a hub public key, we ask
 		if config.HubPublicKey == "" {
 			fmt.Println("What is the Hub public key?")
-			var pubkeyHex string
 			if n, err := fmt.Scanf("%s", config.HubPublicKey); err != nil || n != 64 {
 				panic(err)
 			}
 		}
 
+		// TODO: save configuration if there are changes
+
+		// TODO: is this useful?
+		ssyk.initialized = true
+
+		// init hub
 		hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
 		if err != nil {
 			panic(err)
 		}
-
-		// init hub
 		initHubManager(config.HubAddress, hubPublicKey)
 
 		// Information

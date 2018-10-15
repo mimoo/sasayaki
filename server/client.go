@@ -139,13 +139,12 @@ func success(success bool, message string) ([]byte, error) {
 // because of conn. Otherwise send a failure proto message
 func (cc client) handleSendMessage(req *s.Request) ([]byte, error) {
 	// parse request
-	id := req.Message.GetId()
 	convoId := req.Message.GetConvoId()
 	toAddress := req.Message.GetToAddress()
 	content := req.Message.GetContent()
 	// checking fields
 	// TODO: test if id or convo id = 0 ? (not set)
-	if len(toAddress) != 64 || content == nil || len(content) > messageMaxChars {
+	if len(toAddress) != 64 || content == nil || len(content) > messageMaxChars || len(convoId) != 32 {
 		return success(false, "fields are not correctly formated")
 	}
 	if !regexHex.MatchString(toAddress) {
@@ -157,7 +156,6 @@ func (cc client) handleSendMessage(req *s.Request) ([]byte, error) {
 	mm.queryMutex.Lock()
 	mm.pendingMessages[toAddress] = append(mm.pendingMessages[toAddress], Message{
 		fromAddress: cc.publicKey,
-		id:          id,
 		convoId:     convoId,
 		content:     content,
 	})

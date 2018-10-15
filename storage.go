@@ -65,8 +65,8 @@ func initDatabaseManager() {
 	createStatement := `
 	CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
 	CREATE TABLE IF NOT EXISTS verifications (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, who TEXT, date TIMESTAMP, how TEXT, name TEXT, signature TEXT);
-	CREATE TABLE IF NOT EXISTS conversations (id INTEGER PRIMARY KEY, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, conversation_id INTEGER, date TIMESTAMP, sender TEXT, message BLOB);
+	CREATE TABLE IF NOT EXISTS conversations (id TEXT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
+	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, date TIMESTAMP, sender TEXT, message BLOB);
 	`
 	_, err = storage.db.Exec(createStatement)
 	if err != nil {
@@ -120,7 +120,7 @@ func (storage *databaseState) getThreadRatchetStates(bobAddress string) ([]byte,
 // getSessionKeys finds the session keys for chatting with Bob {convoId, BobAddress}
 //
 // if it doesn't find session keys for a  tuple
-func (storage *databaseState) getSessionKeys(convoId uint64, bobAddress string) ([]byte, []byte, error) {
+func (storage *databaseState) getSessionKeys(convoId, bobAddress string) ([]byte, []byte, error) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
@@ -148,7 +148,7 @@ func (storage *databaseState) getSessionKeys(convoId uint64, bobAddress string) 
 }
 
 // updateSessionKeys will crash if the database query doesn't work
-func (storage *databaseState) updateSessionKeys(convoId uint64, bobAddress string, c1, c2 []byte) {
+func (storage *databaseState) updateSessionKeys(convoId, bobAddress string, c1, c2 []byte) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
@@ -172,51 +172,20 @@ func (storage *databaseState) updateSessionKeys(convoId uint64, bobAddress strin
 	}
 }
 
-func (storage *databaseState) getLastConvoId(bobAddress string) uint64 {
-	storage.queryMutex.Lock()
-	defer storage.queryMutex.Unlock()
-
-	stmt, err := storage.db.Prepare("SELECT id FROM conversations WHERE publickey=? ORDER BY id DESC LIMIT 1;")
-	if err != nil {
-		panic(err)
-	}
-
-	rows, err := stmt.Query(bobAddress)
-	if err != nil {
-		panic(err)
-	}
-
-	if rows.Next() {
-		var lastConvoId uint64
-		err = rows.Scan(lastConvoId)
-		if err != nil {
-			panic(err)
-		}
-		return lastConvoId
-	}
-
-	// we found no conversations yet
-	return 0
-}
-
-func (storage *databaseState) createConvo(convoId uint64, bobAddress, title string, sessionkey1, sessionkey2 []byte) uint64 {
+func (storage *databaseState) createConvo(convoId, bobAddress, title string, sessionkey1, sessionkey2 []byte) {
 	// lock
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
 	// (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	stmt, err = storage.db.Prepare("INSERT INTO conversations VALUES(?, ?, ?, ?, ?, ?, ?);")
+	stmt, err := storage.db.Prepare("INSERT INTO conversations VALUES(?, ?, ?, ?, ?, ?, ?);")
 	if err != nil {
 		panic(err)
 	}
-	res, err := stmt.Exec(convoId, bobAddress, title, bobAddress, title, time.Now(), time.Now(), sessionkey1, sessionkey2)
+	_, err = stmt.Exec(convoId, bobAddress, title, bobAddress, title, time.Now(), time.Now(), sessionkey1, sessionkey2)
 	if err != nil {
 		panic(err)
 	}
-
-	// return convoId created
-	convoId, _ := res.LastInsertId()
-	return uint64(convoId)
 }
 
 // updateThreadRatchetStates takes two serialized thread states and update the bob's contact with them
@@ -245,7 +214,7 @@ func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, 
 }
 
 // TODO: do I need a pointervalue to be able to Lock/Unlock on the mutex?
-func (storage *databaseState) updateTitle(convoId uint64, bobAddress, title string) {
+func (storage *databaseState) updateTitle(convoId, bobAddress, title string) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
@@ -278,4 +247,16 @@ func (storage *databaseState) storeMessage(msg *plaintextMsg) uint64 {
 	// return id created
 	id, _ := res.LastInsertId()
 	return uint64(id)
+}
+
+func (storage *databaseState) ConvoExist(convoId string) bool {
+	stmt, err := storage.db.Prepare("SELECT id FROM conversations WHERE id=? LIMIT 1;")
+	if err != nil {
+		panic(err)
+	}
+	rows, err := stmt.Query(convoId)
+	if err != nil {
+		panic(err) // TODO: what can panic here?
+	}
+	return rows.Next()
 }

@@ -34,7 +34,6 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -62,8 +61,7 @@ func serveLocalWebPage(localAddress string) {
 	r.HandleFunc("/send_message", web.sendMessage).Methods("POST")
 
 	// token
-	_, err := rand.Read(web.token[:])
-	if err != nil {
+	if _, err := rand.Read(web.token[:]); err != nil {
 		panic(err)
 	}
 
@@ -145,8 +143,8 @@ func (web webState) getNewMessage(w http.ResponseWriter, r *http.Request) {
 // http post http://127.0.0.1:7473/send_message Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ== id=1 convo_id=5 to=pubkey
 
 type sendMessageReq struct {
-	Id        string `json:"id"`       // 64-bit?
-	ConvoId   string `json:"convo_id"` // 64-bit?
+	Id        string `json:"id"` // 64-bit?
+	ConvoId   string `json:"convo_id"`
 	ToAddress string `json:"to_address"`
 	Content   string `json:"content"`
 }
@@ -161,29 +159,15 @@ func (web webState) sendMessage(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	var req sendMessageReq
 	err := decoder.Decode(&req)
-	if err != nil || req.Id == "" || req.ConvoId == "" || len(req.ToAddress) != 64 || req.Content == "" || len(req.Content) > messageMaxChars {
+	if err != nil || len(req.ToAddress) != 64 || req.Content == "" || len(req.Content) > messageMaxChars {
 		log.Println("couldn't decode sendMessage req:", err)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
-		return
-	}
-	// to Number
-	msgId, err := strconv.ParseUint(req.Id, 10, 64)
-	if err != nil {
-		log.Println("couldn't decode sendMessage req id:", err)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request id"})
-		return
-	}
-	convoId, err := strconv.ParseUint(req.ConvoId, 10, 64)
-	if err != nil {
-		log.Println("couldn't decode sendMessage req convo id:", err)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request convo id"})
 		return
 	}
 
 	// use the proxy to forward the request to the hub
 	msg := &plaintextMsg{
-		Id:          msgId,
-		ConvoId:     convoId,
+		ConvoId:     req.ConvoId,
 		FromAddress: ssyk.myAddress,
 		ToAddress:   req.ToAddress,
 		Content:     req.Content,
