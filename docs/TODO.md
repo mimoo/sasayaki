@@ -3,6 +3,8 @@
 1. make sure parsing of protobuf structure is fine
 2. create tests (I think I need to get rid of global vars for tests)
 1. create json APIs 
+1. encrypt database
+2. notification is two-way channel with client->server for "read" notification? and server->client for "new_msg"
 1. create tests! can I do a temp database?
     - creating tests will
 1. convo

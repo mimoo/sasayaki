@@ -16,16 +16,19 @@ import (
 func main() {
 	// flags
 	CLIenabled := flag.Bool("cli", false, "run Sasayaki in the terminal")
-	addressUI := flag.String("port", "7474", "the address port of the web UI running on localhost (default 7474)")
+	// TODO: change to port 0?
+	addressUI := flag.String("port", "7473", "the address port of the web UI running on localhost (default 7474)")
 	debug := flag.Bool("debug", false, "debug")
 	flag.Parse()
+	ssyk.debug = *debug
 
 	if *CLIenabled {
 		fmt.Println("Welcome to Sasayaki.")
 		fmt.Println("In order to encrypt information at rest on your computer, please enter a passphrase:")
 		passphrase, err := terminal.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
-			panic(err)
+			fmt.Println(err)
+			return
 		}
 
 		// TODO: ideally, we would use the Hub as an OPRF here, so that our passphrase is not too weak
@@ -33,10 +36,13 @@ func main() {
 		// + rate-limit on the server-side
 
 		// init ~/.sasayaki folder and fetch config + keypair
-		var config configuration
-		config, ssyk.keyPair = initSasayaki(string(passphrase))
+		var config *configuration
+		config, ssyk.keyPair, err = initSasayaki(string(passphrase))
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 		ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
-		ssyk.debug = *debug
 
 		// init database
 		initDatabaseManager()
@@ -46,7 +52,8 @@ func main() {
 		if config.HubAddress == "" {
 			fmt.Println("What is the Hub address?")
 			if _, err := fmt.Scanf("%s", &(config.HubAddress)); err != nil {
-				panic(err)
+				fmt.Println(err)
+				return
 			}
 			updateCfg = true
 		}
@@ -55,7 +62,8 @@ func main() {
 		if config.HubPublicKey == "" {
 			fmt.Println("What is the Hub public key?")
 			if _, err := fmt.Scanf("%s", &(config.HubPublicKey)); err != nil {
-				panic(err)
+				fmt.Println(err)
+				return
 			}
 			updateCfg = true
 		}

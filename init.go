@@ -14,14 +14,14 @@ import (
 )
 
 // the big init function
-func initSasayaki(passphrase string) (configuration, *disco.KeyPair) {
+func initSasayaki(passphrase string) (*configuration, *disco.KeyPair, error) {
 	initSasayakiFolder()
 	config := initConfiguration()
 	keyPair, err := initKeyPair(string(passphrase))
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	return config, keyPair
+	return config, keyPair, nil
 }
 
 type configuration struct {
@@ -31,7 +31,7 @@ type configuration struct {
 
 // read json file
 // TODO: should I encrypt stuff in there?
-func initConfiguration() configuration {
+func initConfiguration() *configuration {
 	home := sasayakiFolder()
 	configFile := filepath.Join(home, "configuration.json")
 	// this will create the file if it doesn't exist
@@ -46,8 +46,8 @@ func initConfiguration() configuration {
 		panic(err)
 	}
 	// parse it
-	cfg := configuration{}
-	json.Unmarshal(configJSON, &cfg)
+	cfg := &configuration{}
+	json.Unmarshal(configJSON, cfg)
 
 	if ssyk.debug {
 		if len(cfg.HubPublicKey) == 0 {

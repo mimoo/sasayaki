@@ -11,7 +11,7 @@ package main
 // It is important to use a special type for plaintext messages as protobuffer messages could set
 // the decrypted content directly or other logic bugs might arise
 type plaintextMsg struct {
-	ConvoId     string `json:"convo_id"`
+	ConvoId     string `json:"convo_id,omitempty"` // can be empty if we're creating a new thread
 	FromAddress string `json:"from_address"`
 	ToAddress   string `json:"to_address"`
 

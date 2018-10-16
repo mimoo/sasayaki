@@ -1,5 +1,5 @@
 //
-// Hub Manager
+// Hub Proxy
 // ===========
 //
 // This file forwards requests to the Hub, to do that it:

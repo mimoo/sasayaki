@@ -1,6 +1,6 @@
 //
-// Web Server
-// ==========
+// Local Web Server
+// ================
 //
 // This file takes care of:
 //
@@ -68,17 +68,33 @@ type passphraseRequest struct {
 	Passphrase string `json:"passphrase"`
 }
 
+// add_contact
+type addContactReq struct {
+	ToAddress string `json:"to_address"`
+}
+
+// accept_contact
+type ackContactReq struct {
+	FromAddress           string `json:"from_address"`
+	FirstHandshakeMessage string `json:"first_handshake_message"`
+}
+
 // serveLocalWebPage is the main function serving the single-page javascript webapp
 // and the different JSON APIs
 func serveLocalWebPage(localAddress string) {
-	// handlers
 	r := mux.NewRouter()
+	// main page
 	r.HandleFunc("/", web.getApp).Methods("GET")
-	r.HandleFunc("/get_new_message", web.getNewMessage).Methods("GET")
-	r.HandleFunc("/send_message", web.sendMessage).Methods("POST")
-
+	// configuration
 	r.HandleFunc("/set_passphrase", web.setPassphrase).Methods("POST")
 	r.HandleFunc("/set_configuration", web.setConfiguration).Methods("POST")
+	r.HandleFunc("/get_configuration", web.getConfiguration).Methods("GET")
+	// contacts
+	r.HandleFunc("/add_contact", web.addContact).Methods("POST")
+	r.HandleFunc("/accept_contact_request", web.acceptContactRequest).Methods("POST")
+	// messages
+	r.HandleFunc("/get_new_message", web.getNewMessage).Methods("GET")
+	r.HandleFunc("/send_message", web.sendMessage).Methods("POST")
 
 	// token
 	if _, err := rand.Read(web.token[:]); err != nil {
@@ -101,8 +117,9 @@ func serveLocalWebPage(localAddress string) {
 // then constant-time compares it to what it should be (a random 16-byte token
 // that we generated when we started the application)
 func verifyToken(givenToken string) bool {
-	// TODO: remove this return true :)
-	return true
+	if ssyk.debug {
+		return true
+	}
 	decodedToken, err := base64.URLEncoding.DecodeString(givenToken)
 	if err != nil {
 		return false
@@ -147,6 +164,11 @@ func (web webState) getApp(w http.ResponseWriter, r *http.Request) {
 // all your messages. It's not ideal but heh, it works for now.
 // http post http://127.0.0.1:7473/send_message Sasayaki-Token:dwl0R9o2SwuZQIAWHv-== id=5 convo_id=6 to_address="12052512a0e1cf14092224dba5a88c98ad8c5efe23f7794a122b9f0268499a10"  content="hey"
 func (web webState) getNewMessage(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
 	// verify auth token
 	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
 		fmt.Fprintf(w, "You need to enter the correct auth token")
@@ -164,7 +186,13 @@ func (web webState) getNewMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // http post http://127.0.0.1:7473/send_message Sasayaki-Token:wZ8VHXeKBoSrQ+m5sGnCFQ== id=1 convo_id=5 to=pubkey
+// sendMessage can be used with an empty convo_id in order to create a new thread
 func (web webState) sendMessage(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
 	// verify auth token
 	if !verifyToken(r.Header.Get("Sasayaki-Token")) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "You need to enter the correct auth token"})
@@ -187,31 +215,44 @@ func (web webState) sendMessage(w http.ResponseWriter, r *http.Request) {
 		ToAddress:   req.ToAddress,
 		Content:     req.Content,
 	}
-	if err := ssyk.sendMessage(msg); err != nil {
+
+	// send message via sasayaki core algorithm
+	if convoId, err := ssyk.sendMessage(msg); err != nil {
 		json.NewEncoder(w).Encode(map[string]string{
 			"success": "false",
 			"error":   err.Error(),
 		})
 	} else {
 		json.NewEncoder(w).Encode(map[string]string{
-			"success": "true",
+			"success":  "true",
+			"convo_id": convoId,
 		})
 	}
 }
 
+// http post http://127.0.0.1:7473/set_passphrase Sasayaki-Token:dwl0R9o2SwuZQIAWHv-== id=5 convo_id=6 to_address="12052512a0e1cf14092224dba5a88c98ad8c5efe23f7794a122b9f0268499a10"  passphrase="prout"
 func (web webState) setPassphrase(w http.ResponseWriter, r *http.Request) {
+	// already initialized?
+	if ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki is already initialized"})
+		return
+	}
 	// parse request
 	decoder := json.NewDecoder(r.Body)
-	var req passphraseRequest
-	err := decoder.Decode(&req)
+	var passphraseReq passphraseRequest
+	err := decoder.Decode(&passphraseReq)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
 		return
 	}
 
 	// init
-	var config configuration
-	config, ssyk.keyPair = initSasayaki(string(req.Passphrase))
+	var config *configuration
+	config, ssyk.keyPair, err = initSasayaki(string(passphraseReq.Passphrase))
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Passphrase is incorrect"})
+		return
+	}
 	ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
 
 	// init database
@@ -233,28 +274,97 @@ func (web webState) setPassphrase(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
 }
 
+// http get http://127.0.0.1:7473/get_configuration Sasayaki-Token:dwl0R9o2SwuZQIAWHv-==
+func (web webState) getConfiguration(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
+
+	//
+	json.NewEncoder(w).Encode(map[string]string{
+		"myAddress":     ssyk.myAddress,
+		"hub_address":   hub.hubAddress,
+		"hub_publickey": hex.EncodeToString(hub.hubPublicKey),
+	})
+}
+
+// http post http://127.0.0.1:7473/set_configuration Sasayaki-Token:dwl0R9o2SwuZQIAWHv-== id=5 convo_id=6 to_address="12052512a0e1cf14092224dba5a88c98ad8c5efe23f7794a122b9f0268499a10"  hub_address="127.0.0.1:7474" hub_publickey="1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21"
 func (web webState) setConfiguration(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
 	// parse request
 	decoder := json.NewDecoder(r.Body)
-	var config configuration
-	err := decoder.Decode(&config)
+	var cfgReq configuration
+	err := decoder.Decode(&cfgReq)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
 		return
 	}
 
 	// init hub
-	hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
+	hubPublicKey, err := hex.DecodeString(cfgReq.HubPublicKey)
 	if err != nil || len(hubPublicKey) != 32 {
+		json.NewEncoder(w).Encode(map[string]string{"error": "hub public key is incorrect"})
+		return
+	}
+
+	initHubManager(cfgReq.HubAddress, hubPublicKey)
+
+	// save configuration
+	cfgReq.updateConfiguration()
+
+	//
+	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
+}
+
+func (web webState) addContact(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
+	// parse request
+	decoder := json.NewDecoder(r.Body)
+	var addReq addContactReq
+	err := decoder.Decode(&config)
+	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
 		return
 	}
 
-	initHubManager(config.HubAddress, hubPublicKey)
+	// pass the request to core
+	if err := ssyk.addContact(addReq.ToAddress); err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	//
+	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
+}
 
-	// save configuration
-	config.updateConfiguration()
-
+func (web webState) acceptContactRequest(w http.ResponseWriter, r *http.Request) {
+	// initialized?
+	if !ssyk.initialized {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Sasayaki needs to be initialized first"})
+		return
+	}
+	// parse request
+	decoder := json.NewDecoder(r.Body)
+	var ackReq ackContactReq
+	err := decoder.Decode(&config)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
+		return
+	}
+	// pass the request to core
+	if err := ssyk.acceptContact(ackReq.FromAddress, ackReq.FirstHandshakeMessage); err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
 	//
 	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
 }

@@ -1,6 +1,6 @@
 //
-// Encryption Manager
-// ==================
+// End-to-End Encryption Service
+// =============================
 //
 // Each contact is either ready, or not, for conversations (depending on if they finished or not their handshake)
 //
@@ -201,4 +201,9 @@ func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMess
 
 	//
 	return nil
+}
+
+// finishHandshake
+func finishHandshake() error {
+
 }

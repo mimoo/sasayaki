@@ -47,12 +47,14 @@ func main() {
 	//
 	// the RPC API
 	//
-	// TODO: timeouts
+	// TODO: have good timeouts for both delivery service and notification service
 	// TODO: the publicKeyVerifier should verify if the public key is part of the organization (it has been signed)
+	// TODO: have a queue system? like zeroq?
 	serverConfig := disco.Config{
-		HandshakePattern:  disco.Noise_IK,
-		KeyPair:           keyPair,
-		PublicKeyVerifier: func(publicKey, proof []byte) bool { return true },
+		HandshakePattern:               disco.Noise_IK,
+		KeyPair:                        keyPair,
+		PublicKeyVerifier:              func(publicKey, proof []byte) bool { return true },
+		RemoteAddrContainsRemotePubkey: true,
 	}
 
 	// listen on port 6666
@@ -74,21 +76,21 @@ func main() {
 	// listen on port 6666
 	// TODO: different timeouts? keep-alive?
 	// I think to avoid DoS I need keep-alive
-	notification, err := disco.Listen("tcp", "127.0.0.1:7475", &serverConfig)
+	notificationList, err := disco.ListenDisco("tcp", "127.0.0.1:7475", &serverConfig)
 	if err != nil {
 		fmt.Println("notification server cannot setup a listener:", err)
 		return
 	}
-	addr = notification.Addr().String()
+	addr = notificationList.Addr().String()
 	fmt.Println("notification server listening on:", addr)
 
-	// currently only accept one client
+	// loop to accept new clients
 	for {
-		conn, err := notification.Accept()
+		conn, err := notificationList.AcceptDisco()
 		if err != nil {
 			log.Println("notification server couldn't accept client:", err)
 			continue
 		}
-		go handleNotificationClient(conn)
+		go notificationClient(conn)
 	}
 }

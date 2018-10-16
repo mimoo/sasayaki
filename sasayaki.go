@@ -81,13 +81,13 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 
 // sendMessage can be used to send a message, or create a new thread
 // in the case of a new thread, convoId must be "0" and the content must be the thread's title
-func (ss sasayakiState) sendMessage(msg *plaintextMsg) error {
+func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 	// initialized?
 	if !ssyk.initialized {
-		return errors.New("ssyk: Sasayaki has not been initialized")
+		return "", errors.New("ssyk: Sasayaki has not been initialized")
 	}
 	// is it a new thread?
-	if msg.ConvoId == "0" {
+	if msg.ConvoId == "" {
 		// generate convoId
 		var randomBytes [16]byte
 		if _, err := rand.Read(randomBytes[:]); err != nil {
@@ -98,23 +98,23 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) error {
 		// create new convo + store
 		encryptedMessage, err := e2e.createNewConvo(msg)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
-			return err
+			return "", err
 		}
 	} else { // nope, it's just a message
 		// add encryption
 		encryptedMessage, err := e2e.encryptMessage(msg)
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
-			return err
+			return "", err
 		}
 
 		// store in database
@@ -122,5 +122,33 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) error {
 	}
 
 	//
-	return nil
+	return msg.ConvoId, nil
+}
+
+func (ss sasayakiState) addContact(bobAddress string) error {
+	panic("not implemented")
+	if len(bobAddress) != 64 {
+		return errors.New("ssyk: contact's address is malformed")
+	}
+
+	bobPubKey, err := hex.DecodeString(bobAddress)
+	if err != nil {
+		return errors.New("ssyk: contact's address is not hexadecimal")
+	}
+
+	return e2e.addContact(bobPubKey)
+}
+
+func (ss sasayakiState) acceptContact(bobAddress string, firstHandshakeMessage []byte) error {
+	panic("not implemented")
+	if len(bobAddress) != 64 {
+		return errors.New("ssyk: contact's address is malformed")
+	}
+
+	bobPubKey, err := hex.DecodeString(bobAddress)
+	if err != nil {
+		return errors.New("ssyk: contact's address is not hexadecimal")
+	}
+
+	return e2e.finishHandshake(bobPubKey, firstHandshakeMessage)
 }

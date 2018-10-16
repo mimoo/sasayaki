@@ -38,7 +38,6 @@ func sasayakiServer(listener *disco.Listener) {
 		}
 		log.Println("client accepted", conn.RemoteAddr().String())
 
-		//		clientKey, err := disco.Conn(conn).RemotePublicKey()
 		clientKey, err := conn.RemotePublicKey()
 		if err != nil {
 			log.Println("cannot read client public key:", err)
@@ -178,7 +177,6 @@ func (cc client) handleGetNextMessage(req *s.Request) ([]byte, error) {
 		message := messages[0]
 		mm.pendingMessages[cc.publicKey] = messages[1:]
 		res.FromAddress = message.fromAddress
-		res.Id = message.id
 		res.ConvoId = message.convoId
 		res.Content = message.content
 	}

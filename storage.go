@@ -1,5 +1,5 @@
 //
-// Database Manager
+// Storage Service
 // ================
 //
 // Contacts
@@ -125,7 +125,7 @@ func (storage *databaseState) getSessionKeys(convoId, bobAddress string) ([]byte
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
-	stmt, err := storage.db.Prepare("SELECT state, c1, c2 FROM conversations WHERE id=? AND publickey=?;")
+	stmt, err := storage.db.Prepare("SELECT c1, c2 FROM conversations WHERE id=? AND publickey=?;")
 	if err != nil {
 		panic(err)
 	}
@@ -136,13 +136,10 @@ func (storage *databaseState) getSessionKeys(convoId, bobAddress string) ([]byte
 	if !rows.Next() {
 		return nil, nil, errors.New("ssyk: the contact is not ready for conversations yet")
 	}
-	var state, c1, c2 []byte
-	err = rows.Scan(state, c1, c2)
+	var c1, c2 []byte
+	err = rows.Scan(c1, c2)
 	if err != nil {
 		return nil, nil, err
-	}
-	if len(state) != 1 || state[0] != 1 {
-		return nil, nil, errors.New("ssyk: the contact is not ready for conversations yet")
 	}
 
 	return c1, c2, nil
