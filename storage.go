@@ -43,7 +43,6 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
-	"time"
 )
 
 type databaseState struct {
@@ -67,7 +66,7 @@ func initDatabaseManager() {
 	CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
 	CREATE TABLE IF NOT EXISTS verifications (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, who TEXT, date TIMESTAMP, how TEXT, name TEXT, signature TEXT);
 	CREATE TABLE IF NOT EXISTS conversations (id TEXT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, date TIMESTAMP, sender TEXT, message BLOB);
+	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, date TIMESTAMP, senderIsMe BOOLEAN, message BLOB);
 	`
 	_, err = storage.db.Exec(createStatement)
 	if err != nil {
@@ -175,12 +174,12 @@ func (storage *databaseState) createConvo(convoId, bobAddress, title string, ses
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
-	// (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	stmt, err := storage.db.Prepare("INSERT INTO conversations VALUES(?, ?, ?, ?, ?, ?, ?);")
+	// (id TEXT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
+	stmt, err := storage.db.Prepare("INSERT INTO conversations VALUES(?, ?, ?, DATETIME('now'), DATETIME('now'), ?, ?);")
 	if err != nil {
 		panic(err)
 	}
-	_, err = stmt.Exec(convoId, bobAddress, title, bobAddress, title, time.Now(), time.Now(), sessionkey1, sessionkey2)
+	_, err = stmt.Exec(convoId, bobAddress, title, sessionkey1, sessionkey2)
 	if err != nil {
 		panic(err)
 	}
@@ -190,7 +189,7 @@ func (storage *databaseState) createConvo(convoId, bobAddress, title string, ses
 func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-
+	//
 	if ts1 == nil && ts2 == nil {
 		panic("ssyk: at least one session key must be defined in order to call updateSessionKeys")
 	}
@@ -215,7 +214,7 @@ func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, 
 func (storage *databaseState) updateTitle(convoId, bobAddress, title string) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-
+	//
 	stmt, err := storage.db.Prepare("UPDATE conversations SET title=? WHERE id=? AND publickey=?;")
 	if err != nil {
 		panic(err)
@@ -228,17 +227,19 @@ func (storage *databaseState) updateTitle(convoId, bobAddress, title string) {
 }
 
 func (storage *databaseState) storeMessage(msg *plaintextMsg) uint64 {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// who sent it?
-	sender := "me"
+	senderIsMe := true
 	if msg.FromAddress != ssyk.myAddress {
-		sender = "bob"
+		senderIsMe = false
 	}
-	// messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER, date TIMESTAMP, sender TEXT, message BLOB)
-	stmt, err := storage.db.Prepare("INSERT INTO messages VALUES(NULL, ?, ?, ?, ?);")
+	// messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER, date TIMESTAMP, senderIsMe TEXT, message BLOB)
+	stmt, err := storage.db.Prepare("INSERT INTO messages VALUES(NULL, ?, DATETIME('now'), ?, ?);")
 	if err != nil {
 		panic(err)
 	}
-	res, err := stmt.Exec(msg.ConvoId, time.Now(), sender, msg.Content)
+	res, err := stmt.Exec(msg.ConvoId, senderIsMe, msg.Content)
 	if err != nil {
 		panic(err)
 	}
@@ -248,6 +249,9 @@ func (storage *databaseState) storeMessage(msg *plaintextMsg) uint64 {
 }
 
 func (storage *databaseState) ConvoExist(convoId string) bool {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+
 	stmt, err := storage.db.Prepare("SELECT id FROM conversations WHERE id=? LIMIT 1;")
 	if err != nil {
 		panic(err)
@@ -257,4 +261,80 @@ func (storage *databaseState) ConvoExist(convoId string) bool {
 		panic(err) // TODO: what can panic here?
 	}
 	return rows.Next()
+}
+
+type contactState uint8
+
+const (
+	noContact        contactState = iota // the contact hasn't been added yet
+	waitingForAccept                     // the contact has been added, waiting for ack
+	contactAdded                         // the contact has been successfuly added
+)
+
+// getStateContact returns nil if no contact has been added yet,
+// otherwise it returns the state (xxxxxx=waiting for answer, 1=all good)
+func (storage *databaseState) getStateContact(bobAddress address) ([]byte, contactState) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+	//
+	stmt, err := storage.db.Prepare("SELECT state FROM contacts WHERE publickey=?;")
+	if err != nil {
+		panic(err)
+	}
+	rows, err := stmt.Query(bobAddress)
+	if err != nil {
+		panic(err) // TODO: what can panic here?
+	}
+	if !rows.Next() {
+		return nil, contactAdded
+	}
+	var state []byte
+	err = rows.Scan(state)
+	if err != nil {
+		panic(err)
+	}
+
+	if len(state) == 1 && state[0] == 1 {
+		return nil, noContact
+	}
+
+	return state, waitingForAccept
+}
+
+func (storage *databaseState) finalizeContactState(bobAddress, name string, ts1, ts2 []byte) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+	// should we create or not?
+	stmt, err := storage.db.Prepare("SELECT state FROM contacts WHERE publickey=?;")
+	if err != nil {
+		panic(err)
+	}
+	rows, err := stmt.Query(bobAddress)
+	if err != nil {
+		panic(err) // TODO: what can panic here?
+	}
+	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
+	if rows.Next() {
+		query = "UPDATE contacts SET state=?, c1=?, c2=? WHERE publickey=?;"
+		stmt, err := storage.db.Prepare(query)
+		if err != nil {
+			panic(err)
+		}
+		_, err = stmt.Exec([]byte{1}, ts1, ts2, bobAddress)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		query = "INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, ?, ?);"
+		stmt, err := storage.db.Prepare(query)
+		if err != nil {
+			panic(err)
+		}
+		_, err = stmt.Exec(bobAddress, name, []byte{1}, ts1, ts2)
+		if err != nil {
+			panic(err)
+		}
+	}
+	//
+
 }

@@ -27,6 +27,7 @@ import (
 	s "github.com/mimoo/sasayaki/serialization"
 
 	"github.com/mimoo/StrobeGo/strobe"
+	disco "github.com/mimoo/disco/libdisco"
 )
 
 type encryptionManager struct {
@@ -40,6 +41,11 @@ func initEncryptionManager(storage *databaseState) {
 	e2e.storage = storage
 }
 */
+
+//
+// Messages
+// ========
+//
 
 // encryptMessage takes a message type and returns a protobuf request containing
 // the encrypted message
@@ -203,7 +209,127 @@ func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMess
 	return nil
 }
 
-// finishHandshake
-func finishHandshake() error {
+//
+// Contact Management
+// ==================
+//
+//     IK:
+//      <- s
+//      ...
+//      -> e, es, s, ss
+//      <- e, ee, se
+//
 
+// addContact produces the first handshake message -> e, es, s, ss
+// note that if this has already been called, it cannot be called again
+// to re-add a contact, it must first be deleted
+func (e2e encryptionManager) addContact(bobAddress string) ([]byte, error) {
+	// check that contact doesn't already have a state
+	_, status := storage.getStateContact(bobAddress)
+	if status == waitingForAccept {
+		return nil, errors.New("ssyk: contact has already been added")
+	}
+	if status == contactAdded {
+		return nil, errors.New("ssyk: contact has already been added successfuly")
+	}
+
+	// TODO: prologue?
+	// idea: [addContact|myAddress|bobAddress]
+	prologue := []byte{}
+
+	// this is dumb, but required by libdisco (TODO: change the API of libdisco?)
+	bobPubKey, err := hex.DecodeString(bobAddress)
+	if err != nil {
+		return errors.New("ssyk: contact's address is not hexadecimal")
+	}
+	bob := &disco.KeyPair
+	copy(bob.PublicKey[:], bobPubKey)
+
+	// Initialize Disco
+	hs := disco.Initialize(disco.Noise_IK, true, prologue, ssyk.keyPair, nil, bobPubKey, nil)
+
+	// write the first message
+	var msg []byte
+	if _, _, err := hs.WriteMessage(nil, msg); err != nil {
+		panic(err)
+	}
+
+	// TODO: store the serialized state
+	storage.addContact(bobAddress, hs.Serialize())
+
+	//
+	return msg, nil
+}
+
+// acceptContactRequest parses the first Noise handshake message -> e, es, s, ss
+// then produces the second (and final) Noise handshake message <- e, ee, se
+// this produces two strobe states that can be used to create threads between the two contacts
+func (e2e encryptionManager) acceptContactRequest(alicePubKey, firstHandshakeMessage []byte) ([]byte, error) {
+	// check in storage if we are at this step in the handshake
+	_, status := getStateContact(bobPubKey)
+	//	if contact == waitingForAccept // it's possible that we've added them as well, ignore it
+	if status == contactAdded {
+		return nil, errors.New("ssyk: contact has already been added successfuly")
+	}
+
+	// needed by libdisco
+	alice := &disco.KeyPair
+	copy(alice.PublicKey[:], alicePubKey)
+
+	// TODO: prologue
+	prologue := []byte{}
+
+	// initialize handshake state
+	hs := disco.Initialize(disco.Noise_IK, false, prologue, ssyk.keyPair, nil, alice, nil)
+	if _, _, err := hs.ReadMessage(firstHandshakeMessage, nil); err != nil {
+		return nil, err
+	}
+
+	// write the second handshake message
+	var msg []byte
+	c1, c2, err := hs.WriteMessage(nil, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: store the thread states + state
+	acceptContact(alicePubKeyhs.Serialize())
+
+	//
+	return msg, nil
+}
+
+// finishHandshake parses the second (and final) Noise handshake message <- e, ee, se
+func (e2e encryptionManager) finishHandshake(bobAddress, name string, secondHandshakeMessage []byte) error {
+	// check in storage if we are at this step in the handshake
+	serializedHandshakeState, status := getStateContact(bobAddress)
+	if status == noContact {
+		return errors.New("ssyk: contact hasn't been added properly")
+	}
+	if status == contactAdded {
+		return errors.New("ssyk: contact has already been added successfuly")
+	}
+
+	// unserialize handshake state
+	hs := disco.RecoverState(serializedHandshakeState)
+
+	// necessary for libdisco
+	bobPubKey, err := hex.DecodeString(bobAddress)
+	if err != nil {
+		return errors.New("ssyk: contact's address is not hexadecimal")
+	}
+	bob := &disco.KeyPair
+	copy(bob.PublicKey[:], bobPubKey)
+
+	// parse last message
+	var payload []byte
+	if ts1, ts2, err := hs.ReadMessage(secondHandshakeMessage, &payload); err != nil {
+		return err
+	}
+
+	// store the thread states + state
+	storage.finalizeContactState(bobAddress, name, ts1, ts2)
+
+	//
+	return nil
 }

@@ -8,6 +8,9 @@
 // - removes or add encryption with the help of the Encryption Manager
 //
 //
+// Ideally:
+// - all checks on inputs should be done here, not before
+// - core calls the storage service, the hub service and the e2e encryption service itself (not always true atm)
 package main
 
 import (
@@ -28,13 +31,14 @@ type sasayakiState struct {
 }
 
 var ssyk sasayakiState
+var errNotInitialized = errors.New("ssyk: Sasayaki has not been initialized")
 
 // getNextMessage retrieves and decrypt a new message from the hub
 // everything message order is kept by the server
 func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	// initialized?
 	if !ssyk.initialized {
-		return nil, errors.New("ssyk: Sasayaki has not been initialized")
+		return nil, errNotInitialized
 	}
 	// obtain next message from hub
 	encryptedMsg, err := hub.getNextMessage()
@@ -60,8 +64,6 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 		return nil, nil // TODO: nil means new convo???
 	}
 
-	// TODO: do we care about checking the id field?
-
 	// remove encryption
 	decryptedMessage, err := e2e.decryptMessage(encryptedMsg)
 	if err != nil {
@@ -74,6 +76,8 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	// TODO: tell the server it can safely delete tuple with {id, convoId, bobAddress}
 	// 			but isn't that going to be way too large messages? That could be sent on the notification channel
 	// 			the notif channel could be a two way channel
+	// 			honestly, if we fail soemthing on our side it's probable that we won't be able to recover anyway
+	// 			(so better to just delete things on the server side)
 
 	// returns
 	return decryptedMessage, nil
@@ -84,7 +88,7 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 	// initialized?
 	if !ssyk.initialized {
-		return "", errors.New("ssyk: Sasayaki has not been initialized")
+		return "", errNotInitialized
 	}
 	// is it a new thread?
 	if msg.ConvoId == "" {
@@ -125,30 +129,60 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 	return msg.ConvoId, nil
 }
 
+// TODO: what happens when we do that?
+// should it send a message coming from us? Or a meta msg from the hub?
+// maybe if we receive a msg from someone we don't know, we can assume it is a request
 func (ss sasayakiState) addContact(bobAddress string) error {
 	panic("not implemented")
+	// initialized?
+	if !ssyk.initialized {
+		return nil, errNotInitialized
+	}
 	if len(bobAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
-	bobPubKey, err := hex.DecodeString(bobAddress)
-	if err != nil {
-		return errors.New("ssyk: contact's address is not hexadecimal")
-	}
+	// TODO: check that we don't already have the contact
+	// if we do, what to do? refresh for future secrecy?
 
-	return e2e.addContact(bobPubKey)
+	firstHandshakeMessage := e2e.addContact(bobAddress)
+
+	// TODO: forward request to hub
 }
 
-func (ss sasayakiState) acceptContact(bobAddress string, firstHandshakeMessage []byte) error {
+// TODO: we should be able to acceptContact even if we did it in the past (
+// for example alice could do addContact / deleteContact / addContact
+func (ss sasayakiState) acceptContact(aliceAddress, name string, firstHandshakeMessage []byte) error {
 	panic("not implemented")
-	if len(bobAddress) != 64 {
+	// initialized?
+	if !ssyk.initialized {
+		return nil, errNotInitialized
+	}
+	// TODO: move all these checks in ssyk?
+	if len(aliceAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
-	bobPubKey, err := hex.DecodeString(bobAddress)
-	if err != nil {
-		return errors.New("ssyk: contact's address is not hexadecimal")
+	return e2e.finishHandshake(aliceAddress, name, firstHandshakeMessage)
+}
+
+// TODO: we need to receive the information that bob has accepted our contact request
+// how? via receipt of a "meta" message?
+// how are friend requests sent anyway?
+func (ss sasayakiState) ackAcceptContact() {
+	panic("not implemented")
+	// initialized?
+	if !ssyk.initialized {
+		return nil, errNotInitialized
 	}
 
-	return e2e.finishHandshake(bobPubKey, firstHandshakeMessage)
+	return e2e.finishHandshake(bobAddress, name, firstHandshakeMessage)
+}
+
+func (ss sasayakiState) deleteContact() {
+	panic("not implemented")
+	// initialized?
+	if !ssyk.initialized {
+		return nil, errNotInitialized
+	}
 }
