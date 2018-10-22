@@ -223,7 +223,7 @@ func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMess
 // addContact produces the first handshake message -> e, es, s, ss
 // note that if this has already been called, it cannot be called again
 // to re-add a contact, it must first be deleted
-func (e2e encryptionManager) addContact(bobAddress string) ([]byte, error) {
+func (e2e encryptionManager) addContact(bobAddress, bobName string) ([]byte, error) {
 	// check that contact doesn't already have a state
 	_, status := storage.getStateContact(bobAddress)
 	if status == waitingForAccept {
@@ -237,43 +237,49 @@ func (e2e encryptionManager) addContact(bobAddress string) ([]byte, error) {
 	// idea: [addContact|myAddress|bobAddress]
 	prologue := []byte{}
 
-	// this is dumb, but required by libdisco (TODO: change the API of libdisco?)
+	// unserialize key
 	bobPubKey, err := hex.DecodeString(bobAddress)
 	if err != nil {
-		return errors.New("ssyk: contact's address is not hexadecimal")
+		return nil, errors.New("ssyk: contact's address is not hexadecimal")
 	}
-	bob := &disco.KeyPair
+	// needed by libdisco
+	bob := &disco.KeyPair{}
 	copy(bob.PublicKey[:], bobPubKey)
 
 	// Initialize Disco
-	hs := disco.Initialize(disco.Noise_IK, true, prologue, ssyk.keyPair, nil, bobPubKey, nil)
+	hs := disco.Initialize(disco.Noise_IK, true, prologue, ssyk.keyPair, nil, bob, nil)
 
 	// write the first message
 	var msg []byte
-	if _, _, err := hs.WriteMessage(nil, msg); err != nil {
+	if _, _, err := hs.WriteMessage(nil, &msg); err != nil {
 		panic(err)
 	}
 
 	// TODO: store the serialized state
-	storage.addContact(bobAddress, hs.Serialize())
+	storage.addContact(bobAddress, bobName, hs.Serialize())
 
 	//
 	return msg, nil
 }
 
-// acceptContactRequest parses the first Noise handshake message -> e, es, s, ss
+// acceptContact parses the first Noise handshake message -> e, es, s, ss
 // then produces the second (and final) Noise handshake message <- e, ee, se
 // this produces two strobe states that can be used to create threads between the two contacts
-func (e2e encryptionManager) acceptContactRequest(alicePubKey, firstHandshakeMessage []byte) ([]byte, error) {
+func (e2e encryptionManager) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, error) {
 	// check in storage if we are at this step in the handshake
-	_, status := getStateContact(bobPubKey)
+	_, status := storage.getStateContact(aliceAddress)
 	//	if contact == waitingForAccept // it's possible that we've added them as well, ignore it
 	if status == contactAdded {
 		return nil, errors.New("ssyk: contact has already been added successfuly")
 	}
 
+	// unserializekey
+	alicePubKey, err := hex.DecodeString(aliceAddress)
+	if err != nil {
+		return nil, errors.New("ssyk: contact's address is not hexadecimal")
+	}
 	// needed by libdisco
-	alice := &disco.KeyPair
+	alice := &disco.KeyPair{}
 	copy(alice.PublicKey[:], alicePubKey)
 
 	// TODO: prologue
@@ -287,20 +293,20 @@ func (e2e encryptionManager) acceptContactRequest(alicePubKey, firstHandshakeMes
 
 	// write the second handshake message
 	var msg []byte
-	c1, c2, err := hs.WriteMessage(nil, msg)
+	ts2, ts1, err := hs.WriteMessage(nil, &msg) // reversed because we are the responder
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: store the thread states + state
-	acceptContact(alicePubKeyhs.Serialize())
+	storage.addContact(aliceAddress, aliceName, alicePubKeyhs.Serialize())
 
 	//
 	return msg, nil
 }
 
 // finishHandshake parses the second (and final) Noise handshake message <- e, ee, se
-func (e2e encryptionManager) finishHandshake(bobAddress, name string, secondHandshakeMessage []byte) error {
+func (e2e encryptionManager) finishHandshake(bobAddress, secondHandshakeMessage []byte) error {
 	// check in storage if we are at this step in the handshake
 	serializedHandshakeState, status := getStateContact(bobAddress)
 	if status == noContact {
@@ -328,7 +334,7 @@ func (e2e encryptionManager) finishHandshake(bobAddress, name string, secondHand
 	}
 
 	// store the thread states + state
-	storage.finalizeContactState(bobAddress, name, ts1, ts2)
+	storage.updateContact(bobAddress, ts1, ts2)
 
 	//
 	return nil

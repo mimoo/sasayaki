@@ -1,5 +1,7 @@
 # Threat Model and Rational
 
+Sasayaki adopts the Internet threat model [RFC 3552](https://tools.ietf.org/html/rfc3552) and therefore assumes that the attacker has complete control over the network.
+
 Sasayaki or NCC Group Messenger was designed as an end-to-end encrypted messaging application for a specific work environement (NCC Group):
 
 * no multi-device support: a single work station hosting the keys

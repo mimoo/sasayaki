@@ -2,39 +2,10 @@
 // Storage Service
 // ================
 //
-// Contacts
-// - id
-// - publickey: of the account
-// - date: metadata
-// - name: hector
-// - state: 0=none, xxxxxx=waiting for answer, 1=c1 and c2 good to be used
-// - c1: state for creating threads ->
-// - c2: state for creating threads <-
+// This is using a pretty simple sqlite database (see below for the schema)
 //
-// Verifications
-// - id
-// - publickey: of the verified account
-// - who: publickey of verifier
-// - date: metadata
-// - how: via facebook
-// - name: hector
-// - signature: signature from "who" over "'verification' | date | publickey | len_name | name | len_how | how"
 //
-// Conversations
-// - id: we can have different convos with the same person (like email)
-// - publickey: of the account
-// - title: metadata
-// - date_creation: metadata
-// - date_last_message: metadata
-// - c1: state after the last message ->
-// - c2: state after the last message <-
 //
-// Messages
-// - id
-// - conversation_id
-// - date: metadata
-// - sender: me or bob
-// - message: actual content
 
 package main
 
@@ -63,13 +34,42 @@ func initDatabaseManager() {
 	}
 
 	createStatement := `
-	CREATE TABLE IF NOT EXISTS contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
-	CREATE TABLE IF NOT EXISTS verifications (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, who TEXT, date TIMESTAMP, how TEXT, name TEXT, signature TEXT);
-	CREATE TABLE IF NOT EXISTS conversations (id TEXT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
-	CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, date TIMESTAMP, senderIsMe BOOLEAN, message BLOB);
+	CREATE TABLE IF NOT EXISTS contacts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique integer per account
+		publickey TEXT NOT NULL UNIQUE, 			-- public key of the contact
+		date TIMESTAMP, 											-- date added
+		name TEXT, 														-- name chosen by us (often given by organization)
+		state BLOB, 													-- the serialized handshake state or "1" (handshake done)
+		c1 BLOB, 															-- serialized strobe state to create threads ->
+		c2 BLOB 															-- serialized strobe state to create threads <-
+	);
+	CREATE TABLE IF NOT EXISTS verifications (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique integer per verification
+		publickey TEXT NOT NULL, 							-- the public key of the verified account
+		who TEXT NOT NULL, 										-- who is verifying the account
+		date TIMESTAMP, 											-- when this verification was done
+		how TEXT, 														-- how this verification was done (facebook, twitter, irl, etc.)
+		name TEXT, 														-- the name used by the verifier to identify the public key
+		signature TEXT NOT NULL 							-- the actual public key
+	);
+	CREATE TABLE IF NOT EXISTS conversations (
+		id TEXT NOT NULL, 										-- a 16-byte random value? TODO: outch? collisions?
+		publickey TEXT NOT NULL , 						-- the public key of the other peer
+		title TEXT, 													-- the title of the thread
+		date_creation TIMESTAMP, 							-- the date the thread was created
+		date_last_message TIMESTAMP, 					-- the date the last message was sent/received
+		c1 BLOB, 															-- the serialized strobe state to send messages
+		c2 BLOB 															-- the serialized strobe state to receive messages
+	);
+	CREATE TABLE IF NOT EXISTS messages (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, -- 
+		conversation_id TEXT NOT NULL , 			-- the conversation the message is part of
+		date TIMESTAMP, 											-- time the message was sent/received
+		senderIsMe BOOLEAN, 									-- 0: I sent the message, 1: I received the message
+		message BLOB 													-- the actual message 
+	);
 	`
-	_, err = storage.db.Exec(createStatement)
-	if err != nil {
+	if _, err := storage.db.Exec(createStatement); err != nil {
 		panic(err)
 	}
 
@@ -301,7 +301,24 @@ func (storage *databaseState) getStateContact(bobAddress address) ([]byte, conta
 	return state, waitingForAccept
 }
 
-func (storage *databaseState) finalizeContactState(bobAddress, name string, ts1, ts2 []byte) {
+func (storage *databaseState) addContact(bobAddress, bobName string, state []byte) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+
+	query = "INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, ?, ?);"
+	stmt, err := storage.db.Prepare(query)
+	if err != nil {
+		panic(err)
+	}
+	_, err = stmt.Exec(bobAddress, bobName, []byte{1}, ts1, ts2)
+	if err != nil {
+		panic(err)
+	}
+}
+
+// updateContact either update or insert
+// TODO: is it called for inserting?
+func (storage *databaseState) updateContact(bobAddress string, ts1, ts2 []byte) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 	// should we create or not?
@@ -330,11 +347,17 @@ func (storage *databaseState) finalizeContactState(bobAddress, name string, ts1,
 		if err != nil {
 			panic(err)
 		}
-		_, err = stmt.Exec(bobAddress, name, []byte{1}, ts1, ts2)
+		_, err = stmt.Exec(bobAddress, bobName, []byte{1}, ts1, ts2)
 		if err != nil {
 			panic(err)
 		}
 	}
 	//
+}
 
+func (storage *databaseState) deleteContact(bobAddress string) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+	// TODO: return error if no row was deleted?
+	panic("not implemented")
 }

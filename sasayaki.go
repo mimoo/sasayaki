@@ -132,7 +132,7 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 // TODO: what happens when we do that?
 // should it send a message coming from us? Or a meta msg from the hub?
 // maybe if we receive a msg from someone we don't know, we can assume it is a request
-func (ss sasayakiState) addContact(bobAddress string) error {
+func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
@@ -145,14 +145,15 @@ func (ss sasayakiState) addContact(bobAddress string) error {
 	// TODO: check that we don't already have the contact
 	// if we do, what to do? refresh for future secrecy?
 
-	firstHandshakeMessage := e2e.addContact(bobAddress)
+	firstHandshakeMessage := e2e.addContact(bobAddress, bobName)
 
 	// TODO: forward request to hub
 }
 
 // TODO: we should be able to acceptContact even if we did it in the past (
 // for example alice could do addContact / deleteContact / addContact
-func (ss sasayakiState) acceptContact(aliceAddress, name string, firstHandshakeMessage []byte) error {
+// TODO: should it return the contact id or something usable by the app?
+func (ss sasayakiState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
@@ -163,26 +164,29 @@ func (ss sasayakiState) acceptContact(aliceAddress, name string, firstHandshakeM
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
-	return e2e.finishHandshake(aliceAddress, name, firstHandshakeMessage)
+	return e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
 }
 
 // TODO: we need to receive the information that bob has accepted our contact request
 // how? via receipt of a "meta" message?
 // how are friend requests sent anyway?
-func (ss sasayakiState) ackAcceptContact() {
+func (ss sasayakiState) ackAcceptContact(bobAddress string, secondHandshakeMessage []byte) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
-		return nil, errNotInitialized
+		return errNotInitialized
 	}
 
-	return e2e.finishHandshake(bobAddress, name, firstHandshakeMessage)
+	return e2e.finishHandshake(bobAddress, secondHandshakeMessage)
 }
 
-func (ss sasayakiState) deleteContact() {
+// deleteContact is used to delete a contact from storage
+func (ss sasayakiState) deleteContact(bobAddress string) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
 		return nil, errNotInitialized
 	}
+
+	return storage.deleteContact(bobAddress)
 }
