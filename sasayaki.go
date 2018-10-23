@@ -27,14 +27,34 @@ type sasayakiState struct {
 
 	initialized bool // useful for webUI
 
+	e2e     *encryptionState
+	storage *storageState
+	hub     *hubState
+
 	debug bool // debug stuff
 }
 
 var ssyk sasayakiState
 var errNotInitialized = errors.New("ssyk: Sasayaki has not been initialized")
 
+func initSasayakiState(keyPair *disco.KeyPair) *sasayakiState {
+
+	e2e := initEncryptionState(keyPair)
+	hub := initHubState(hubAddress, hubPublicKey)
+	storage := initStorageState(sqliteAddress)
+
+	ssyk := &sasayakiState{
+		myAddress: hex.EncodeToString(keyPair.PublicKey[:]),
+		e2e:       e2e,
+		storage:   storage,
+		hub:       hub,
+	}
+	return ssyk
+}
+
 // getNextMessage retrieves and decrypt a new message from the hub
-// everything message order is kept by the server
+// message order is ensured by the server, otherwise it will break the thread
+// messages can also be contact requests, or contact acceptance
 func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	// initialized?
 	if !ssyk.initialized {
@@ -46,26 +66,34 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 		return nil, err
 	}
 
-	// check fields
-	if len(encryptedMsg.GetConvoId()) != 32 {
-		return nil, errors.New("ssyk: message received malformed")
-	}
-
 	// no address == no new message
 	if encryptedMsg.GetFromAddress() == "" {
 		return nil, errors.New("ssyk: no new messages")
 	}
 
 	// checking if we're expecting a handshake message
-	_, status := storage.getStateContact(bobAddress)
+	switch _, status := storage.getStateContact(bobAddress); status {
+	case noContact: // first handshake message
+		addContactFromReq(encryptedMsg)
+		return // TODO: what do we return here? (should we return an interface?)
+	case waitingForAccept: // second handshake message
+		finalizeContact(encryptedMsg)
+		return // TODO: what do we return here?
+	case waitingToAccept: // TODO: should we really handle this case or let the rest fail?
+		// TODO: if server doesn't delete message without our request, it's not going to work
+		// TODO: idea: the getNextMessage request could also contain an ack for the previous
+		return
+	case contactAdded:
+		return handleNewMessage(encryptedMsg)
+	default:
+		panic("should not happen")
+	}
+}
 
-	if status == noContact { // first handshake message
-		panic("not implemented")
-
-	} else if status == waitingForAccept { // second handshake message
-		panic("not implemented")
-	} else if status == waitingToAccept { // TODO: should we really handle this case or let the rest fail?
-		panic("wow, should we really handle this case?")
+func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) {
+	// check fields
+	if len(encryptedMsg.GetConvoId()) != 32 {
+		return nil, errors.New("ssyk: message received malformed")
 	}
 
 	// new convo? create it
