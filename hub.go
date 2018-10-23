@@ -13,7 +13,6 @@ package main
 import (
 	"errors"
 	"net"
-	"sync"
 
 	"github.com/golang/protobuf/proto"
 
@@ -31,21 +30,21 @@ var (
 )
 
 type hubState struct {
-	conn       net.Conn   // the connection to the hub
-	queryMutex sync.Mutex // one hub query at a time
+	conn net.Conn // the connection to the hub
 
 	hubAddress   string
 	hubPublicKey []byte
 }
 
-var hub hubState
-
-func initHubManager(hubAddress string, hubPublicKey []byte) {
-	hub.hubAddress = hubAddress
-	hub.hubPublicKey = hubPublicKey
+func initHubState(hubAddress string, hubPublicKey []byte) *hubState {
+	hub := &hubState{
+		hubAddress:   hubAddress,
+		hubPublicKey: hubPublicKey,
+	}
+	return hub
 }
 
-func isHubReady() error {
+func (hub *hubState) isHubReady() error {
 	// if we already have a conn, return
 	if hub.conn != nil {
 		return nil
@@ -74,11 +73,8 @@ func isHubReady() error {
 // TODO: of course encrypt the message before sending it :)
 // TODO: needs a cryptoManager? or endToEndManager? or encryptionManager
 func (hub *hubState) sendMessage(encryptedMessage *s.Request_Message) error {
-	// one query at a time
-	hub.queryMutex.Lock()
-	defer hub.queryMutex.Unlock()
 	// do we have a connection working?
-	if err := isHubReady(); err != nil {
+	if err := hub.isHubReady(); err != nil {
 		return err
 	}
 	// proto structure
@@ -130,11 +126,8 @@ func (hub *hubState) sendMessage(encryptedMessage *s.Request_Message) error {
 
 // getNextMessage receives a protobuffer structure and returns a message type
 func (hub *hubState) getNextMessage() (*s.ResponseMessage, error) {
-	// one query at a time
-	hub.queryMutex.Lock()
-	defer hub.queryMutex.Unlock()
 	// do we have a connection?
-	if err := isHubReady(); err != nil {
+	if err := hub.isHubReady(); err != nil {
 		return nil, err
 	}
 	// create query

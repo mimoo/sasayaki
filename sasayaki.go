@@ -17,37 +17,37 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"sync"
 
 	disco "github.com/mimoo/disco/libdisco"
 )
 
 type sasayakiState struct {
-	keyPair   *disco.KeyPair // my long-term static keypair
-	myAddress string         // public key in hex form
+	myAddress string // public key in hex form
 
-	initialized bool // useful for webUI
+	queryMutex sync.Mutex // one query at a time
 
 	e2e     *encryptionState
 	storage *storageState
 	hub     *hubState
-
-	debug bool // debug stuff
 }
 
 var ssyk sasayakiState
 var errNotInitialized = errors.New("ssyk: Sasayaki has not been initialized")
 
-func initSasayakiState(keyPair *disco.KeyPair) *sasayakiState {
-
-	e2e := initEncryptionState(keyPair)
-	hub := initHubState(hubAddress, hubPublicKey)
-	storage := initStorageState(sqliteAddress)
-
+func initSasayakiState(keyPair *disco.KeyPair, config *configuration) (*sasayakiState, error) {
+	// hub needs a public key
+	hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
+	if err != nil || len(hubPublicKey) != 32 {
+		return nil, errors.New("ssyk: incorrect hub public key")
+	}
+	//
 	ssyk := &sasayakiState{
-		myAddress: hex.EncodeToString(keyPair.PublicKey[:]),
-		e2e:       e2e,
-		storage:   storage,
-		hub:       hub,
+		myAddress:   keyPair.ExportPublicKey(),
+		e2e:         initEncryptionState(keyPair),
+		storage:     initStorageState(),
+		hub:         initHubState(config.hubAddress, hubPublicKey),
+		initialized: true,
 	}
 	return ssyk
 }
@@ -56,10 +56,8 @@ func initSasayakiState(keyPair *disco.KeyPair) *sasayakiState {
 // message order is ensured by the server, otherwise it will break the thread
 // messages can also be contact requests, or contact acceptance
 func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
-	// initialized?
-	if !ssyk.initialized {
-		return nil, errNotInitialized
-	}
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// obtain next message from hub
 	encryptedMsg, err := hub.getNextMessage()
 	if err != nil {
@@ -126,6 +124,8 @@ func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) {
 // sendMessage can be used to send a message, or create a new thread
 // in the case of a new thread, convoId must be "0" and the content must be the thread's title
 func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// initialized?
 	if !ssyk.initialized {
 		return "", errNotInitialized
@@ -173,7 +173,8 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 // should it send a message coming from us? Or a meta msg from the hub?
 // maybe if we receive a msg from someone we don't know, we can assume it is a request
 func (ss sasayakiState) addContact(bobAddress, bobName string) error {
-	panic("not implemented")
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// initialized?
 	if !ssyk.initialized {
 		return errNotInitialized
@@ -182,13 +183,20 @@ func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
-	// TODO: check that we don't already have the contact
-	// if we do, what to do? refresh for future secrecy?
+	// check that contact doesn't already have a state
+	_, status := storage.getStateContact(bobAddress)
+	if status != noContact {
+		return nil, errors.New("ssyk: contact has already been added")
+	}
 
-	firstHandshakeMessage, err := e2e.addContact(bobAddress, bobName)
+	// get the first handshake message
+	firstHandshakeMessage, serializedHandshakeState, err := e2e.addContact(bobAddress, bobName)
 	if err != nil {
 		return err
 	}
+
+	// store the new contact with the serialized handshake
+	storage.addContact(bobAddress, bobName, serializedHandshakeState)
 
 	// create message to send
 	var randomBytes [16]byte
@@ -209,6 +217,8 @@ func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 }
 
 func (ss sasayakiState) receiveContactRequest(aliceAddress string, firstHandshakeMessage []byte) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// initialized?
 	if !ssyk.initialized {
 		return errNotInitialized
@@ -220,6 +230,8 @@ func (ss sasayakiState) receiveContactRequest(aliceAddress string, firstHandshak
 // for example alice could do addContact / deleteContact / addContact
 // TODO: should it return the contact id or something usable by the app?
 func (ss sasayakiState) acceptContact(aliceAddress, aliceName string) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	// initialized?
 	if !ssyk.initialized {
 		return errNotInitialized
@@ -245,6 +257,8 @@ func (ss sasayakiState) acceptContact(aliceAddress, aliceName string) error {
 // how? via receipt of a "meta" message?
 // how are friend requests sent anyway?
 func (ss sasayakiState) ackAcceptContact(bobAddress string, secondHandshakeMessage []byte) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
@@ -260,6 +274,8 @@ func (ss sasayakiState) ackAcceptContact(bobAddress string, secondHandshakeMessa
 
 // deleteContact is used to delete a contact from storage
 func (ss sasayakiState) deleteContact(bobAddress string) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {

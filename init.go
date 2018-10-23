@@ -49,7 +49,7 @@ func initConfiguration() *configuration {
 	cfg := &configuration{}
 	json.Unmarshal(configJSON, cfg)
 
-	if ssyk.debug {
+	if debug {
 		if len(cfg.HubPublicKey) == 0 {
 			cfg.HubPublicKey = "1274e5b61840d54271e4144b80edc5af946a970ef1d84329368d1ec381ba2e21"
 		}
@@ -96,7 +96,7 @@ func initSasayakiFolder() {
 	// create ~/.sasayaki/keys if it doesn't exists
 	keyFolder := filepath.Join(home, "keys")
 	if _, err := os.Stat(keyFolder); os.IsNotExist(err) {
-		fmt.Println("sasayaki: creating configuration folder at", home)
+		fmt.Println("ssyk: creating configuration folder at", home)
 		os.MkdirAll(keyFolder, 0770) // user | group | all
 	}
 }
@@ -107,12 +107,12 @@ func initKeyPair(passphrase string) (*disco.KeyPair, error) {
 	location := filepath.Join(sasayakiFolder(), "/keys/keypair")
 	// create ~/.sasayaki/keys/keyPair
 	if _, err := os.Stat(location); os.IsNotExist(err) {
-		fmt.Println("sasayaki: generating a keypair for new user")
+		fmt.Println("ssyk: generating a keypair for new user")
 		return disco.GenerateAndSaveDiscoKeyPair(location, passphrase)
 	} else { // if it already exists, load it
 		keyPair, err := disco.LoadDiscoKeyPair(location, passphrase)
 		if err != nil {
-			return nil, errors.New("sasayaki: Cannot decrypt keyPair with given passphrase")
+			return nil, errors.New("ssyk: Cannot decrypt keyPair with given passphrase")
 		}
 		return keyPair, nil
 	}

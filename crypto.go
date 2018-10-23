@@ -30,17 +30,18 @@ import (
 	disco "github.com/mimoo/disco/libdisco"
 )
 
-type encryptionManager struct {
-	//	storage *databaseState
+type encryptionState struct {
+	keyPair *disco.KeyPair
 }
 
-var e2e encryptionManager
+var e2e encryptionState
 
-/*
-func initEncryptionManager(storage *databaseState) {
-	e2e.storage = storage
+func initEncryptionState(keyPair *disco.KeyPair) *encryptionState {
+	e2e := &encryptionState{
+		keyPair: keyPair,
+	}
+	return e2e
 }
-*/
 
 //
 // Messages
@@ -49,7 +50,7 @@ func initEncryptionManager(storage *databaseState) {
 
 // encryptMessage takes a message type and returns a protobuf request containing
 // the encrypted message
-func (e2e encryptionManager) encryptMessage(msg *plaintextMsg) (*s.Request_Message, error) {
+func (e2e encryptionState) encryptMessage(msg *plaintextMsg) (*s.Request_Message, error) {
 	// check for arbitrary 1000 bytes of room for headers and protobuff structure
 	if len(msg.Content) > 65535-1000 {
 		return nil, errors.New("ssyk: message to send is too large")
@@ -73,7 +74,7 @@ func (e2e encryptionManager) encryptMessage(msg *plaintextMsg) (*s.Request_Messa
 		return nil, err
 	}
 	copy(toAuthenticate[0:16], convoId)
-	copy(toAuthenticate[16:16+32], ssyk.keyPair.PublicKey[:])
+	copy(toAuthenticate[16:16+32], e2e.keyPair.PublicKey[:])
 	copy(toAuthenticate[16+32:16+32+32], bobPubKey)
 	// encrypt message
 	ciphertext := s1.Send_AEAD([]byte(msg.Content), toAuthenticate)
@@ -90,7 +91,7 @@ func (e2e encryptionManager) encryptMessage(msg *plaintextMsg) (*s.Request_Messa
 }
 
 // decryptMessage takes a protobuf encrypted responseMessage and returns the decrypted content
-func (e2e encryptionManager) decryptMessage(encryptedMsg *s.ResponseMessage) (*plaintextMsg, error) {
+func (e2e encryptionState) decryptMessage(encryptedMsg *s.ResponseMessage) (*plaintextMsg, error) {
 	// check
 	if encryptedMsg.GetContent() == nil {
 		return nil, errors.New("ssyk: message received is incorrectly formed")
@@ -112,7 +113,7 @@ func (e2e encryptionManager) decryptMessage(encryptedMsg *s.ResponseMessage) (*p
 	}
 	copy(toAuthenticate[0:16], convoId)
 	copy(toAuthenticate[16:16+32], bobPubKey)
-	copy(toAuthenticate[16+32:16+32+32], ssyk.keyPair.PublicKey[:])
+	copy(toAuthenticate[16+32:16+32+32], e2e.keyPair.PublicKey[:])
 
 	// decrypt message
 	s2 := strobe.RecoverState(c2)
@@ -127,14 +128,14 @@ func (e2e encryptionManager) decryptMessage(encryptedMsg *s.ResponseMessage) (*p
 	msg := &plaintextMsg{
 		ConvoId:     encryptedMsg.GetConvoId(),
 		FromAddress: encryptedMsg.GetFromAddress(),
-		ToAddress:   ssyk.myAddress,
+		ToAddress:   e2e.keyPair.ExportPublicKey(),
 		Content:     string(plaintext),
 	}
 	//
 	return msg, nil
 }
 
-func (e2e encryptionManager) createNewConvo(msg *plaintextMsg) (*s.Request_Message, error) {
+func (e2e encryptionState) createNewConvo(msg *plaintextMsg) (*s.Request_Message, error) {
 	// get thread states for me -> bob
 	t1, _, err := storage.getThreadRatchetStates(msg.ToAddress)
 	if err != nil {
@@ -167,7 +168,7 @@ func (e2e encryptionManager) createNewConvo(msg *plaintextMsg) (*s.Request_Messa
 	return e2e.encryptMessage(msg)
 }
 
-func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMessage) error {
+func (e2e encryptionState) createConvoFromMessage(encryptedMsg *s.ResponseMessage) error {
 	// get thread states for me -> bob
 	_, t2, err := storage.getThreadRatchetStates(encryptedMsg.GetFromAddress())
 	if err != nil {
@@ -223,16 +224,7 @@ func (e2e encryptionManager) createConvoFromMessage(encryptedMsg *s.ResponseMess
 // addContact produces the first handshake message -> e, es, s, ss
 // note that if this has already been called, it cannot be called again
 // to re-add a contact, it must first be deleted
-func (e2e encryptionManager) addContact(bobAddress, bobName string) ([]byte, error) {
-	// check that contact doesn't already have a state
-	_, status := storage.getStateContact(bobAddress)
-	if status == waitingForAccept {
-		return nil, errors.New("ssyk: contact has already been added")
-	}
-	if status == contactAdded {
-		return nil, errors.New("ssyk: contact has already been added successfuly")
-	}
-
+func (e2e encryptionState) addContact(bobAddress, bobName string) ([]byte, []byte, error) {
 	// TODO: prologue?
 	// idea: [addContact|myAddress|bobAddress]
 	prologue := []byte{}
@@ -240,14 +232,14 @@ func (e2e encryptionManager) addContact(bobAddress, bobName string) ([]byte, err
 	// unserialize key
 	bobPubKey, err := hex.DecodeString(bobAddress)
 	if err != nil {
-		return nil, errors.New("ssyk: contact's address is not hexadecimal")
+		return nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
 	}
 	// needed by libdisco
 	bob := &disco.KeyPair{}
 	copy(bob.PublicKey[:], bobPubKey)
 
 	// Initialize Disco
-	hs := disco.Initialize(disco.Noise_IK, true, prologue, ssyk.keyPair, nil, bob, nil)
+	hs := disco.Initialize(disco.Noise_IK, true, prologue, e2e.keyPair, nil, bob, nil)
 
 	// write the first message
 	var msg []byte
@@ -255,17 +247,14 @@ func (e2e encryptionManager) addContact(bobAddress, bobName string) ([]byte, err
 		panic(err)
 	}
 
-	// store the serialized state
-	storage.addContact(bobAddress, bobName, hs.Serialize())
-
 	//
-	return msg, nil
+	return msg, hs.Serialize(), nil
 }
 
 // acceptContact parses the first Noise handshake message -> e, es, s, ss
 // then produces the second (and final) Noise handshake message <- e, ee, se
 // this produces two strobe states that can be used to create threads between the two contacts
-func (e2e encryptionManager) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, error) {
+func (e2e encryptionState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, error) {
 	// check in storage if we are at this step in the handshake
 	_, status := storage.getStateContact(aliceAddress)
 	//	if contact == waitingForAccept // it's possible that we've added them as well, ignore it
@@ -286,7 +275,7 @@ func (e2e encryptionManager) acceptContact(aliceAddress, aliceName string, first
 	prologue := []byte{}
 
 	// initialize handshake state
-	hs := disco.Initialize(disco.Noise_IK, false, prologue, ssyk.keyPair, nil, alice, nil)
+	hs := disco.Initialize(disco.Noise_IK, false, prologue, e2e.keyPair, nil, alice, nil)
 	if _, _, err := hs.ReadMessage(firstHandshakeMessage, nil); err != nil {
 		return nil, err
 	}
@@ -307,7 +296,7 @@ func (e2e encryptionManager) acceptContact(aliceAddress, aliceName string, first
 }
 
 // finishHandshake parses the second (and final) Noise handshake message <- e, ee, se
-func (e2e encryptionManager) finishHandshake(bobAddress string, secondHandshakeMessage []byte) error {
+func (e2e encryptionState) finishAddContact(bobAddress string, secondHandshakeMessage []byte) error {
 	// check in storage if we are at this step in the handshake
 	serializedHandshakeState, status := storage.getStateContact(bobAddress)
 	if status == noContact {
@@ -318,7 +307,7 @@ func (e2e encryptionManager) finishHandshake(bobAddress string, secondHandshakeM
 	}
 
 	// unserialize handshake state
-	hs := disco.RecoverState(serializedHandshakeState, nil, ssyk.keyPair)
+	hs := disco.RecoverState(serializedHandshakeState, nil, e2e.keyPair)
 
 	// necessary for libdisco
 	bobPubKey, err := hex.DecodeString(bobAddress)

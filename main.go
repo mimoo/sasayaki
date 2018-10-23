@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +12,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var debug bool
+
 func main() {
 	// flags
 	CLIenabled := flag.Bool("cli", false, "run Sasayaki in the terminal")
@@ -20,7 +21,7 @@ func main() {
 	addressUI := flag.String("port", "7473", "the address port of the web UI running on localhost (default 7474)")
 	debug := flag.Bool("debug", false, "debug")
 	flag.Parse()
-	ssyk.debug = *debug
+	debug = *debug
 
 	if *CLIenabled {
 		fmt.Println("Welcome to Sasayaki.")
@@ -42,10 +43,6 @@ func main() {
 			fmt.Println(err)
 			return
 		}
-		ssyk.myAddress = ssyk.keyPair.ExportPublicKey()
-
-		// init database
-		initDatabaseManager()
 
 		// if we don't have a hub address, we ask
 		var updateCfg bool
@@ -73,24 +70,13 @@ func main() {
 			config.updateConfiguration()
 		}
 
-		// init hub
-		hubPublicKey, err := hex.DecodeString(config.HubPublicKey)
-		if err != nil || len(hubPublicKey) != 32 {
-			fmt.Println("cannot parse the hub's public key. Please re-run Sasayaki")
-			config.resetConfiguration()
-			return
-		}
-
-		initHubManager(config.HubAddress, hubPublicKey)
-
-		// TODO: is this useful?
-		ssyk.initialized = true
-
 		// Information
 		fmt.Println("this is your public key:", ssyk.keyPair.ExportPublicKey())
 		fmt.Println("this is the current config:", config)
 
-		//
+		// init sasayakiState
+		initSasayakiState(keyPair, config)
+
 	} else {
 
 		// set address for the web UI
