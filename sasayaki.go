@@ -56,6 +56,18 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 		return nil, errors.New("ssyk: no new messages")
 	}
 
+	// checking if we're expecting a handshake message
+	_, status := storage.getStateContact(bobAddress)
+
+	if status == noContact { // first handshake message
+		panic("not implemented")
+
+	} else if status == waitingForAccept { // second handshake message
+		panic("not implemented")
+	} else if status == waitingToAccept { // TODO: should we really handle this case or let the rest fail?
+		panic("wow, should we really handle this case?")
+	}
+
 	// new convo? create it
 	if !storage.ConvoExist(encryptedMsg.GetConvoId()) {
 		if err := e2e.createConvoFromMessage(encryptedMsg); err != nil {
@@ -136,7 +148,7 @@ func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
-		return nil, errNotInitialized
+		return errNotInitialized
 	}
 	if len(bobAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
@@ -145,26 +157,60 @@ func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 	// TODO: check that we don't already have the contact
 	// if we do, what to do? refresh for future secrecy?
 
-	firstHandshakeMessage := e2e.addContact(bobAddress, bobName)
+	firstHandshakeMessage, err := e2e.addContact(bobAddress, bobName)
+	if err != nil {
+		return err
+	}
 
-	// TODO: forward request to hub
+	// create message to send
+	var randomBytes [16]byte
+	if _, err := rand.Read(randomBytes[:]); err != nil {
+		panic(err)
+	}
+	msgToSend := &s.Request_Message{
+		ToAddress: bobAddress,
+		ConvoId:   hex.EncodeToString(randomBytes[:]),
+		Content:   hex.EncodeToString(firstHandshakeMessage),
+	}
+
+	// forward request to hub
+	hub.sendMessage(msgToSend)
+
+	//
+	return nil
+}
+
+func (ss sasayakiState) receiveContactRequest(aliceAddress string, firstHandshakeMessage []byte) error {
+	// initialized?
+	if !ssyk.initialized {
+		return errNotInitialized
+	}
+	panic("not implemented")
 }
 
 // TODO: we should be able to acceptContact even if we did it in the past (
 // for example alice could do addContact / deleteContact / addContact
 // TODO: should it return the contact id or something usable by the app?
-func (ss sasayakiState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) error {
-	panic("not implemented")
+func (ss sasayakiState) acceptContact(aliceAddress, aliceName string) error {
 	// initialized?
 	if !ssyk.initialized {
-		return nil, errNotInitialized
+		return errNotInitialized
 	}
 	// TODO: move all these checks in ssyk?
 	if len(aliceAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
-	return e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
+	// parse handshake message and continue handshake
+	secondHandshakeMsg, err := e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
+	if err != nil {
+		return err
+	}
+
+	// forward message to hub
+	panic("no hub support")
+
+	return nil
 }
 
 // TODO: we need to receive the information that bob has accepted our contact request
@@ -177,7 +223,11 @@ func (ss sasayakiState) ackAcceptContact(bobAddress string, secondHandshakeMessa
 		return errNotInitialized
 	}
 
-	return e2e.finishHandshake(bobAddress, secondHandshakeMessage)
+	e2e.finishHandshake(bobAddress, secondHandshakeMessage)
+
+	panic("no hub support")
+
+	return nil
 }
 
 // deleteContact is used to delete a contact from storage
@@ -185,8 +235,10 @@ func (ss sasayakiState) deleteContact(bobAddress string) error {
 	panic("not implemented")
 	// initialized?
 	if !ssyk.initialized {
-		return nil, errNotInitialized
+		return errNotInitialized
 	}
+
+	// TODO: no fwd to hub right?
 
 	return storage.deleteContact(bobAddress)
 }

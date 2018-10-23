@@ -255,7 +255,7 @@ func (e2e encryptionManager) addContact(bobAddress, bobName string) ([]byte, err
 		panic(err)
 	}
 
-	// TODO: store the serialized state
+	// store the serialized state
 	storage.addContact(bobAddress, bobName, hs.Serialize())
 
 	//
@@ -298,17 +298,18 @@ func (e2e encryptionManager) acceptContact(aliceAddress, aliceName string, first
 		return nil, err
 	}
 
-	// TODO: store the thread states + state
-	storage.addContact(aliceAddress, aliceName, alicePubKeyhs.Serialize())
+	// store the thread states + state
+	storage.addContact(aliceAddress, aliceName, nil)
+	storage.updateContact(aliceAddress, ts1.Serialize(), ts2.Serialize())
 
 	//
 	return msg, nil
 }
 
 // finishHandshake parses the second (and final) Noise handshake message <- e, ee, se
-func (e2e encryptionManager) finishHandshake(bobAddress, secondHandshakeMessage []byte) error {
+func (e2e encryptionManager) finishHandshake(bobAddress string, secondHandshakeMessage []byte) error {
 	// check in storage if we are at this step in the handshake
-	serializedHandshakeState, status := getStateContact(bobAddress)
+	serializedHandshakeState, status := storage.getStateContact(bobAddress)
 	if status == noContact {
 		return errors.New("ssyk: contact hasn't been added properly")
 	}
@@ -317,24 +318,25 @@ func (e2e encryptionManager) finishHandshake(bobAddress, secondHandshakeMessage 
 	}
 
 	// unserialize handshake state
-	hs := disco.RecoverState(serializedHandshakeState)
+	hs := disco.RecoverState(serializedHandshakeState, nil, ssyk.keyPair)
 
 	// necessary for libdisco
 	bobPubKey, err := hex.DecodeString(bobAddress)
 	if err != nil {
 		return errors.New("ssyk: contact's address is not hexadecimal")
 	}
-	bob := &disco.KeyPair
+	bob := &disco.KeyPair{}
 	copy(bob.PublicKey[:], bobPubKey)
 
 	// parse last message
 	var payload []byte
-	if ts1, ts2, err := hs.ReadMessage(secondHandshakeMessage, &payload); err != nil {
+	ts1, ts2, err := hs.ReadMessage(secondHandshakeMessage, &payload)
+	if err != nil {
 		return err
 	}
 
 	// store the thread states + state
-	storage.updateContact(bobAddress, ts1, ts2)
+	storage.updateContact(bobAddress, ts1.Serialize(), ts2.Serialize())
 
 	//
 	return nil

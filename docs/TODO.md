@@ -1,6 +1,9 @@
 # MVP
 
 1. make sure parsing of protobuf structure is fine
+2. Should we rename e2e, storage, etc... cryptoState, storageState, hubState, sasayakiState, etc.? 
+    - this would be more in line with Disco/Noise/Strobe :D
+* move the mutex to sasayaki State?
 2. create tests (I think I need to get rid of global vars for tests)
 1. create json APIs 
 1. encrypt database

@@ -71,11 +71,13 @@ type passphraseRequest struct {
 // add_contact
 type addContactReq struct {
 	ToAddress string `json:"to_address"`
+	Name      string `json:"name"`
 }
 
 // accept_contact
 type ackContactReq struct {
 	FromAddress           string `json:"from_address"`
+	Name                  string `json:"name"`
 	FirstHandshakeMessage string `json:"first_handshake_message"`
 }
 
@@ -331,14 +333,14 @@ func (web webState) addContact(w http.ResponseWriter, r *http.Request) {
 	// parse request
 	decoder := json.NewDecoder(r.Body)
 	var addReq addContactReq
-	err := decoder.Decode(&config)
+	err := decoder.Decode(&addReq)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
 		return
 	}
 
 	// pass the request to core
-	if err := ssyk.addContact(addReq.ToAddress); err != nil {
+	if err := ssyk.addContact(addReq.ToAddress, addReq.Name); err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -355,16 +357,24 @@ func (web webState) acceptContactRequest(w http.ResponseWriter, r *http.Request)
 	// parse request
 	decoder := json.NewDecoder(r.Body)
 	var ackReq ackContactReq
-	err := decoder.Decode(&config)
+	err := decoder.Decode(&ackReq)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the request"})
 		return
 	}
+	// decode first handshake message
+	handshakeMsg, err := hex.DecodeString(ackReq.FirstHandshakeMessage)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]string{"error": "Couldn't parse the handshake message"})
+		return
+	}
+
 	// pass the request to core
-	if err := ssyk.acceptContact(ackReq.FromAddress, ackReq.FirstHandshakeMessage); err != nil {
+	if err := ssyk.acceptContact(ackReq.FromAddress, ackReq.Name, handshakeMsg); err != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+
 	//
 	json.NewEncoder(w).Encode(map[string]string{"success": "true"})
 }

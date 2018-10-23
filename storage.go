@@ -33,13 +33,20 @@ func initDatabaseManager() {
 		panic(err)
 	}
 
+	// The local database.
+	//
+	// Note that `contacts.state` requires a bit more explanation. It contains either:
+	// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
+	// - [1|blob] : we received a contact request, blob is the received handshake message
+	// - [2|empty] : we are done with the handshake, blob is empty
+	//
 	createStatement := `
 	CREATE TABLE IF NOT EXISTS contacts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, -- unique integer per account
 		publickey TEXT NOT NULL UNIQUE, 			-- public key of the contact
 		date TIMESTAMP, 											-- date added
 		name TEXT, 														-- name chosen by us (often given by organization)
-		state BLOB, 													-- the serialized handshake state or "1" (handshake done)
+		state BLOB, 													-- the serialized handshake (see comment above for more information)
 		c1 BLOB, 															-- serialized strobe state to create threads ->
 		c2 BLOB 															-- serialized strobe state to create threads <-
 	);
@@ -267,13 +274,14 @@ type contactState uint8
 
 const (
 	noContact        contactState = iota // the contact hasn't been added yet
-	waitingForAccept                     // the contact has been added, waiting for ack
+	waitingForAccept                     // the contact has been added, waiting for 2nd handshake message
+	waitingToAccept                      // the contact has been added, waiting to send 2nd handshake message
 	contactAdded                         // the contact has been successfuly added
 )
 
 // getStateContact returns nil if no contact has been added yet,
 // otherwise it returns the state (xxxxxx=waiting for answer, 1=all good)
-func (storage *databaseState) getStateContact(bobAddress address) ([]byte, contactState) {
+func (storage *databaseState) getStateContact(bobAddress string) ([]byte, contactState) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 	//
@@ -286,7 +294,7 @@ func (storage *databaseState) getStateContact(bobAddress address) ([]byte, conta
 		panic(err) // TODO: what can panic here?
 	}
 	if !rows.Next() {
-		return nil, contactAdded
+		return nil, noContact
 	}
 	var state []byte
 	err = rows.Scan(state)
@@ -294,70 +302,127 @@ func (storage *databaseState) getStateContact(bobAddress address) ([]byte, conta
 		panic(err)
 	}
 
-	if len(state) == 1 && state[0] == 1 {
-		return nil, noContact
-	}
+// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
+// - [1|blob] : we received a contact request, blob is the received handshake message
+// - [2|empty] : we are done with the handshake, blob is empty
+	if state[0] == 0 {
+		return state[1:], waitingForAccept
+	} else if state[0] == 1 {
+		return state[1:], waitingToAccept
+	} 
 
-	return state, waitingForAccept
+	return nil, contactAdded
 }
 
-func (storage *databaseState) addContact(bobAddress, bobName string, state []byte) {
+// addContact is used when adding a contact for the very first time 
+// (which is supposed to send a handshake message)
+// Note that `contacts.state` requires a bit more explanation. It contains either:
+// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
+// - [1|blob] : we received a contact request, blob is the received handshake message
+// - [2|empty] : we are done with the handshake, blob is empty
+func (storage *databaseState) addContact(bobAddress, bobName string, serializedHandshakeState []byte) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 
-	query = "INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, ?, ?);"
-	stmt, err := storage.db.Prepare(query)
-	if err != nil {
-		panic(err)
-	}
-	_, err = stmt.Exec(bobAddress, bobName, []byte{1}, ts1, ts2)
-	if err != nil {
-		panic(err)
-	}
-}
-
-// updateContact either update or insert
-// TODO: is it called for inserting?
-func (storage *databaseState) updateContact(bobAddress string, ts1, ts2 []byte) error {
-	storage.queryMutex.Lock()
-	defer storage.queryMutex.Unlock()
-	// should we create or not?
-	stmt, err := storage.db.Prepare("SELECT state FROM contacts WHERE publickey=?;")
-	if err != nil {
-		panic(err)
-	}
-	rows, err := stmt.Query(bobAddress)
-	if err != nil {
-		panic(err) // TODO: what can panic here?
-	}
 	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
-	if rows.Next() {
-		query = "UPDATE contacts SET state=?, c1=?, c2=? WHERE publickey=?;"
-		stmt, err := storage.db.Prepare(query)
-		if err != nil {
-			panic(err)
-		}
-		_, err = stmt.Exec([]byte{1}, ts1, ts2, bobAddress)
-		if err != nil {
-			panic(err)
-		}
-	} else {
-		query = "INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, ?, ?);"
-		stmt, err := storage.db.Prepare(query)
-		if err != nil {
-			panic(err)
-		}
-		_, err = stmt.Exec(bobAddress, bobName, []byte{1}, ts1, ts2)
-		if err != nil {
-			panic(err)
-		}
+	stmt, err := storage.db.Prepare("INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, NULL, NULL);")
+	if err != nil {
+		panic(err)
+	}
+	_, err = stmt.Exec(bobAddress, bobName, append([]byte{0, serializedHandshakeState...})
+	if err != nil {
+		panic(err)
+	}
+}
+
+// addContactFromReq is used to add a new contact entry from a received contact request 
+// this function assumes that there is not already a contact for this entry
+func (storage *databaseState) addContactFromReq(aliceAddress string, firstHandshakeMessage []byte) {
+	// lock db
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+
+	// 
+	stmt, err := storage.db.Prepare("INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), NULL, ?, NULL, NULL);")
+	if err != nil {
+		panic(err)
+	}
+	_, err = stmt.Exec(aliceAddress, append([]byte{1, firstHandshakeMessage...})
+	if err != nil {
+		panic(err)
+	}
+
+
+}
+
+// updateContact is used when finalized a handshake by both peers
+// Note that `contacts.state` requires a bit more explanation. It contains either:
+// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
+// - [1|blob] : we received a contact request, blob is the received handshake message
+// - [2|empty] : we are done with the handshake, blob is empty
+func (storage *databaseState) finalizeContact(bobAddress, ts1, ts2 []byte) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
+	stmt, err = storage.db.Prepare("UPDATE contacts SET state=?, c1=?, c2=? WHERE publickey=?;")
+	if err != nil {
+		panic(err)
+	}
+	res, err = stmt.Exec([]byte{2}, ts1, ts2, bobAddress)
+	if err != nil {
+		panic(err)
+	}
+	affect, err = res.RowsAffected()
+	if err != nil {
+		panic(err)
+	}
+	if len(affect) != 1 {
+		return errors.New("ssyk: contact does not exist")
 	}
 	//
+	return nil
+}
+
+func updateContactName(bobAddress, bobName string) error {
+	storage.queryMutex.Lock()
+	defer storage.queryMutex.Unlock()
+	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
+	stmt, err = storage.db.Prepare("UPDATE contacts SET name=? WHERE publickey=?;")
+	if err != nil {
+		panic(err)
+	}
+	res, err = stmt.Exec(bobName, bobAddress)
+	if err != nil {
+		panic(err)
+	}
+	affect, err = res.RowsAffected()
+	if err != nil {
+		panic(err)
+	}
+	if len(affect) != 1 {
+		return errors.New("ssyk: contact does not exist")
+	}
+	return nil
 }
 
 func (storage *databaseState) deleteContact(bobAddress string) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	// TODO: return error if no row was deleted?
-	panic("not implemented")
+
+	stmt, err = storage.db.Prepare("DELETE FROM contacts WHERE publickey=?;")
+	if err != nil {
+		panic(err)
+	}
+	res, err = stmt.Exec(bobAddress)
+	if err != nil {
+		panic(err)
+	}
+	affect, err = res.RowsAffected()
+	if err != nil {
+		panic(err)
+	}
+	if len(affect) != 1 {
+		return errors.New("ssyk: contact does not exist")
+	}
+	return nil
 }
