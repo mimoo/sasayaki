@@ -33,7 +33,6 @@ type sasayakiState struct {
 }
 
 var ssyk sasayakiState
-var errNotInitialized = errors.New("ssyk: Sasayaki has not been initialized")
 
 func initSasayakiState(keyPair *disco.KeyPair, config *configuration) (*sasayakiState, error) {
 	// hub needs a public key
@@ -43,11 +42,10 @@ func initSasayakiState(keyPair *disco.KeyPair, config *configuration) (*sasayaki
 	}
 	//
 	ssyk := &sasayakiState{
-		myAddress:   keyPair.ExportPublicKey(),
-		e2e:         initEncryptionState(keyPair),
-		storage:     initStorageState(),
-		hub:         initHubState(config.hubAddress, hubPublicKey),
-		initialized: true,
+		myAddress: keyPair.ExportPublicKey(),
+		e2e:       initEncryptionState(keyPair),
+		storage:   initStorageState(),
+		hub:       initHubState(config.hubAddress, hubPublicKey),
 	}
 	return ssyk
 }
@@ -68,19 +66,20 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	if encryptedMsg.GetFromAddress() == "" {
 		return nil, errors.New("ssyk: no new messages")
 	}
+	// TODO: sanitize encryptedMsg? are addresses 32-byte hex?
 
 	// checking if we're expecting a handshake message
 	switch _, status := storage.getStateContact(bobAddress); status {
 	case noContact: // first handshake message
 		addContactFromReq(encryptedMsg)
-		return // TODO: what do we return here? (should we return an interface?)
+		return nil, nil // TODO: what do we return here? (should we return an interface?)
 	case waitingForAccept: // second handshake message
 		finalizeContact(encryptedMsg)
-		return // TODO: what do we return here?
+		return nil, nil // TODO: what do we return here?
 	case waitingToAccept: // TODO: should we really handle this case or let the rest fail?
 		// TODO: if server doesn't delete message without our request, it's not going to work
 		// TODO: idea: the getNextMessage request could also contain an ack for the previous
-		return
+		return nil, nil
 	case contactAdded:
 		return handleNewMessage(encryptedMsg)
 	default:
@@ -88,7 +87,7 @@ func (ss sasayakiState) getNextMessage() (*plaintextMsg, error) {
 	}
 }
 
-func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) {
+func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) (*plaintextMsg, error) {
 	// check fields
 	if len(encryptedMsg.GetConvoId()) != 32 {
 		return nil, errors.New("ssyk: message received malformed")
@@ -96,18 +95,46 @@ func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) {
 
 	// new convo? create it
 	if !storage.ConvoExist(encryptedMsg.GetConvoId()) {
-		if err := e2e.createConvoFromMessage(encryptedMsg); err != nil {
-			return nil, err
+
+		// get thread states for me -> bob
+		_, t2, err := storage.getThreadRatchetStates(encryptedMsg.GetFromAddress())
+		if err != nil {
+			return err
 		}
-		return nil, nil // TODO: nil means new convo???
+		// create convo message
+		threadState, s1, s2 := e2e.createConvoFromMessage(t2, encryptedMsg)
+
+		// create the conversation with the current thread ratchet value
+		storage.createConvo(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), "", s1, s2)
+
+		// update the thread state
+		storage.updateThreadRatchetStates(encryptedMsg.GetFromAddress(), nil, threadState)
+
+		// decrypt the title
+		titleMessage, err := e2e.decryptMessage(s1, encryptedMsg)
+		if err != nil {
+			return err
+		}
+
+		// update the title
+		storage.updateTitle(titleMessage.ConvoId, titleMessage.FromAddress, titleMessage.Content)
+
+		// TODO: nil means new convo???
+		return nil, nil
 	}
 
-	// remove encryption
-	decryptedMessage, err := e2e.decryptMessage(encryptedMsg)
+	// get session keys
+	_, c2, err := storage.getSessionKeys(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress())
 	if err != nil {
 		return nil, err
 	}
-
+	// remove encryption
+	decryptedMessage, strobeState, err := e2e.decryptMessage(c2, encryptedMsg)
+	if err != nil {
+		return nil, err
+	}
+	// store new state
+	storage.updateSessionKeys(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), nil, strobeState)
 	// store message
 	storage.storeMessage(decryptedMessage)
 
@@ -122,14 +149,10 @@ func (ss sasayakiState) handleNewMessage(encryptedMsg *s.ResponseMessage) {
 }
 
 // sendMessage can be used to send a message, or create a new thread
-// in the case of a new thread, convoId must be "0" and the content must be the thread's title
+// in the case of a new thread, convoId must be "" and the content must be the thread's title
 func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	// initialized?
-	if !ssyk.initialized {
-		return "", errNotInitialized
-	}
 	// is it a new thread?
 	if msg.ConvoId == "" {
 		// generate convoId
@@ -139,28 +162,41 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 		}
 		msg.ConvoId = hex.EncodeToString(randomBytes[:])
 
-		// create new convo + store
-		encryptedMessage, err := e2e.createNewConvo(msg)
+		// get thread states for me -> bob
+		t1, _, err := storage.getThreadRatchetStates(msg.ToAddress)
+		if err != nil {
+			return nil, err
+		}
+		// create new convo
+		encryptedMessage, threadState, s1, s2, err := e2e.createNewConvo(t1, msg)
 		if err != nil {
 			return "", err
 		}
-
+		// update the thread state
+		storage.updateThreadRatchetStates(msg.ToAddress, threadState, nil)
+		// create the conversation with the current thread ratchet value and a random convoId
+		storage.createConvo(msg.ConvoId, msg.ToAddress, msg.Content, s1, s2)
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
 			return "", err
 		}
 	} else { // nope, it's just a message
+		// get strobeState
+		c1, _, err := storage.getSessionKeys(msg.ConvoId, msg.ToAddress)
+		if err != nil {
+			return nil, err
+		}
 		// add encryption
-		encryptedMessage, err := e2e.encryptMessage(msg)
+		encryptedMessage, strobeState, err := e2e.encryptMessage(c1, msg)
 		if err != nil {
 			return "", err
 		}
-
+		// update strobeState
+		storage.updateSessionKeys(msg.ConvoId, msg.ToAddress, strobeState, nil)
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
 			return "", err
 		}
-
 		// store in database
 		storage.storeMessage(msg)
 	}
@@ -169,16 +205,13 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 	return msg.ConvoId, nil
 }
 
+// addContact creates a contact request
 // TODO: what happens when we do that?
 // should it send a message coming from us? Or a meta msg from the hub?
 // maybe if we receive a msg from someone we don't know, we can assume it is a request
-func (ss sasayakiState) addContact(bobAddress, bobName string) error {
+func (ss sasayakiState) aliceAddContact(bobAddress, bobName string) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	// initialized?
-	if !ssyk.initialized {
-		return errNotInitialized
-	}
 	if len(bobAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
 	}
@@ -216,57 +249,80 @@ func (ss sasayakiState) addContact(bobAddress, bobName string) error {
 	return nil
 }
 
-func (ss sasayakiState) receiveContactRequest(aliceAddress string, firstHandshakeMessage []byte) error {
+// receiveContactRequest is called when a contact request is being received.
+// It stores the firstHandshakeMessage for later use
+func (ss sasayakiState) bobReceiveContactRequest(aliceAddress string, firstHandshakeMessage []byte) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	// initialized?
-	if !ssyk.initialized {
-		return errNotInitialized
+	// check in storage if we are at this step in the handshake
+	if _, status := storage.getStateContact(aliceAddress); status != noContact {
+		return errors.New("ssyk: contact has already been added")
 	}
-	panic("not implemented")
+	// store the thread states + state
+	storage.addContactFromReq(aliceAddress, aliceName, firstHandshakeMessage)
+	//
+	return nil
 }
 
+// bobAcceptContact finalizes the handshake from the responder side
 // TODO: we should be able to acceptContact even if we did it in the past (
 // for example alice could do addContact / deleteContact / addContact
 // TODO: should it return the contact id or something usable by the app?
-func (ss sasayakiState) acceptContact(aliceAddress, aliceName string) error {
+func (ss sasayakiState) bobAcceptContact(aliceAddress, aliceName string) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	// initialized?
-	if !ssyk.initialized {
-		return errNotInitialized
-	}
 	// TODO: move all these checks in ssyk?
 	if len(aliceAddress) != 64 {
 		return errors.New("ssyk: contact's address is malformed")
 	}
 
+	// check in storage if we are at this step in the handshake
+	firstHandshakeMessage, status := storage.getStateContact(aliceAddress)
+	if status != waitingToAccept {
+		return nil, errors.New("ssyk: contact is not being added properly")
+	}
+
 	// parse handshake message and continue handshake
-	secondHandshakeMsg, err := e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
+	ts1, ts2, secondHandshakeMsg, err := e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
 	if err != nil {
 		return err
 	}
 
-	// forward message to hub
+	// update contact with thread states
+	storage.updateContact(aliceAddress, ts1, ts2)
+
+	// forward second handshake message to hub
 	panic("no hub support")
 
 	return nil
 }
 
+// aliceAckAcceptContact finalizes the handshake from the initiator side
 // TODO: we need to receive the information that bob has accepted our contact request
 // how? via receipt of a "meta" message?
 // how are friend requests sent anyway?
-func (ss sasayakiState) ackAcceptContact(bobAddress string, secondHandshakeMessage []byte) error {
+func (ss sasayakiState) aliceAckAcceptContact(bobAddress string, secondHandshakeMessage []byte) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
-	panic("not implemented")
-	// initialized?
-	if !ssyk.initialized {
-		return errNotInitialized
+
+	// TODO: where do we verify that bobAddress is proper?
+
+	// check in storage if we are at this step in the handshake
+	serializedHandshakeState, status := storage.getStateContact(bobAddress)
+	if status != waitingForAccept {
+		return errors.New("ssyk: contact has not been added properly")
 	}
 
-	e2e.finishHandshake(bobAddress, secondHandshakeMessage)
+	// finish handshake and get threadStates
+	ts1, ts2, err := e2e.finishAddContact(serializedHandshakeState, secondHandshakeMessage)
+	if err != nil {
+		return err
+	}
 
+	// store the thread states
+	storage.updateContact(bobAddress, ts1, ts2)
+
+	// hub?
 	panic("no hub support")
 
 	return nil
@@ -277,10 +333,6 @@ func (ss sasayakiState) deleteContact(bobAddress string) error {
 	storage.queryMutex.Lock()
 	defer storage.queryMutex.Unlock()
 	panic("not implemented")
-	// initialized?
-	if !ssyk.initialized {
-		return errNotInitialized
-	}
 
 	// TODO: no fwd to hub right?
 

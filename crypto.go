@@ -50,36 +50,30 @@ func initEncryptionState(keyPair *disco.KeyPair) *encryptionState {
 
 // encryptMessage takes a message type and returns a protobuf request containing
 // the encrypted message
-func (e2e encryptionState) encryptMessage(msg *plaintextMsg) (*s.Request_Message, error) {
+func (e2e encryptionState) encryptMessage(strobeState []byte, msg *plaintextMsg) (*s.Request_Message, []byte, error) {
 	// check for arbitrary 1000 bytes of room for headers and protobuff structure
 	if len(msg.Content) > 65535-1000 {
-		return nil, errors.New("ssyk: message to send is too large")
+		return nil, nil, errors.New("ssyk: message to send is too large")
 	}
-	// get session keys
-	c1, _, err := storage.getSessionKeys(msg.ConvoId, msg.ToAddress)
-	if err != nil {
-		return nil, err
-	}
+
 	// recover strobe state
-	s1 := strobe.RecoverState(c1)
+	s1 := strobe.RecoverState(strobeState)
 	// data to authenticate [convoId(8), sendPubKey(32), recvPubKey(32)]
 	// TODO: what else should we authenticate here?
 	toAuthenticate := make([]byte, 16+32+32)
 	convoId, err := hex.DecodeString(msg.ConvoId)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	bobPubKey, err := hex.DecodeString(msg.ToAddress)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	copy(toAuthenticate[0:16], convoId)
 	copy(toAuthenticate[16:16+32], e2e.keyPair.PublicKey[:])
 	copy(toAuthenticate[16+32:16+32+32], bobPubKey)
 	// encrypt message
 	ciphertext := s1.Send_AEAD([]byte(msg.Content), toAuthenticate)
-	// store new state
-	storage.updateSessionKeys(msg.ConvoId, msg.ToAddress, s1.Serialize(), nil)
 	// create return value
 	encryptedMessage := &s.Request_Message{
 		ToAddress: msg.ToAddress,
@@ -87,43 +81,36 @@ func (e2e encryptionState) encryptMessage(msg *plaintextMsg) (*s.Request_Message
 		Content:   ciphertext,
 	}
 	// return ciphertext
-	return encryptedMessage, nil
+	return encryptedMessage, s1.Serialize(), nil
 }
 
 // decryptMessage takes a protobuf encrypted responseMessage and returns the decrypted content
-func (e2e encryptionState) decryptMessage(encryptedMsg *s.ResponseMessage) (*plaintextMsg, error) {
+func (e2e encryptionState) decryptMessage(strobeState []byte, encryptedMsg *s.ResponseMessage) (*plaintextMsg, []byte, error) {
 	// check
 	if encryptedMsg.GetContent() == nil {
-		return nil, errors.New("ssyk: message received is incorrectly formed")
-	}
-	// get session keys
-	_, c2, err := storage.getSessionKeys(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress())
-	if err != nil {
-		return nil, err
+		return nil, nil, errors.New("ssyk: message received is incorrectly formed")
 	}
 	// data to authenticate [convoId(8), sendPubKey(32), recvPubKey(32)]
 	toAuthenticate := make([]byte, 16+32+32)
 	convoId, err := hex.DecodeString(encryptedMsg.GetConvoId())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	bobPubKey, err := hex.DecodeString(encryptedMsg.GetFromAddress())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	copy(toAuthenticate[0:16], convoId)
 	copy(toAuthenticate[16:16+32], bobPubKey)
 	copy(toAuthenticate[16+32:16+32+32], e2e.keyPair.PublicKey[:])
 
 	// decrypt message
-	s2 := strobe.RecoverState(c2)
+	s2 := strobe.RecoverState(strobeState)
 	plaintext, ok := s2.Recv_AEAD(encryptedMsg.GetContent(), toAuthenticate)
 	if !ok {
-		return nil, errors.New("ssyk: impossible to decrypt incoming message")
+		return nil, nil, errors.New("ssyk: impossible to decrypt incoming message")
 		// TODO: this should completely kill the thread
 	}
-	// store new state
-	storage.updateSessionKeys(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), nil, s2.Serialize())
 	// return plaintext
 	msg := &plaintextMsg{
 		ConvoId:     encryptedMsg.GetConvoId(),
@@ -132,18 +119,13 @@ func (e2e encryptionState) decryptMessage(encryptedMsg *s.ResponseMessage) (*pla
 		Content:     string(plaintext),
 	}
 	//
-	return msg, nil
+	return msg, s2.Serialize(), nil
 }
 
-func (e2e encryptionState) createNewConvo(msg *plaintextMsg) (*s.Request_Message, error) {
-	// get thread states for me -> bob
-	t1, _, err := storage.getThreadRatchetStates(msg.ToAddress)
-	if err != nil {
-		return nil, err
-	}
-
+// createNewConvo returns the new threadState (after ratcheting) and the two session keys created for the thread
+func (e2e encryptionState) createNewConvo(threadState []byte, msg *plaintextMsg) (*s.Request_Message, []byte, []byte, []byte, error) {
 	// recover state
-	threadState := strobe.RecoverState(t1)
+	threadState := strobe.RecoverState(threadState)
 
 	// create the session keys for the convo (following disco spec)
 	s1 := threadState.Clone()
@@ -155,32 +137,21 @@ func (e2e encryptionState) createNewConvo(msg *plaintextMsg) (*s.Request_Message
 	s2.AD(true, []byte("responder"))
 	s2.RATCHET(32)
 
-	// create the conversation with the current thread ratchet value and a random convoId
-	storage.createConvo(msg.ConvoId, msg.ToAddress, msg.Content, s1.Serialize(), s2.Serialize())
-
 	// ratchet the thread state (following disco spec)
 	threadState.RATCHET(32)
-
-	// update the thread state
-	storage.updateThreadRatchetStates(msg.ToAddress, threadState.Serialize(), nil)
 
 	// encrypt the title and return it
-	return e2e.encryptMessage(msg)
+	return e2e.encryptMessage(msg), threadState.Serialize(), s1.Serialize(), s2.Serialize(), nil
 }
 
-func (e2e encryptionState) createConvoFromMessage(encryptedMsg *s.ResponseMessage) error {
-	// get thread states for me -> bob
-	_, t2, err := storage.getThreadRatchetStates(encryptedMsg.GetFromAddress())
-	if err != nil {
-		return err
-	}
-
+// from a threadState, create new session keys. Ratchets the state. returns all
+func (e2e encryptionState) createConvoFromMessage(threadState []byte) ([]byte, []byte, []byte) {
 	// recover state
-	threadState := strobe.RecoverState(t2)
+	ts := strobe.RecoverState(threadState)
 
 	// create the session keys for the convo (following disco spec)
-	s1 := threadState.Clone()
-	s2 := threadState.Clone()
+	s1 := ts.Clone()
+	s2 := ts.Clone()
 
 	s1.AD(true, []byte("initiator"))
 	s1.RATCHET(32)
@@ -188,26 +159,11 @@ func (e2e encryptionState) createConvoFromMessage(encryptedMsg *s.ResponseMessag
 	s2.AD(true, []byte("responder"))
 	s2.RATCHET(32)
 
-	// create the conversation with the current thread ratchet value
-	storage.createConvo(encryptedMsg.GetConvoId(), encryptedMsg.GetFromAddress(), "", s1.Serialize(), s2.Serialize())
-
-	// decrypt the title
-	titleMessage, err := e2e.decryptMessage(encryptedMsg)
-	if err != nil {
-		return err
-	}
-
-	// update the title
-	storage.updateTitle(titleMessage.ConvoId, titleMessage.FromAddress, titleMessage.Content)
-
 	// ratchet the thread state (following disco spec)
-	threadState.RATCHET(32)
-
-	// update the thread state
-	storage.updateThreadRatchetStates(encryptedMsg.GetFromAddress(), nil, threadState.Serialize())
+	ts.RATCHET(32)
 
 	//
-	return nil
+	return ts.Serialize(), s1.Serialize(), s2.Serialize()
 }
 
 //
@@ -254,18 +210,11 @@ func (e2e encryptionState) addContact(bobAddress, bobName string) ([]byte, []byt
 // acceptContact parses the first Noise handshake message -> e, es, s, ss
 // then produces the second (and final) Noise handshake message <- e, ee, se
 // this produces two strobe states that can be used to create threads between the two contacts
-func (e2e encryptionState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, error) {
-	// check in storage if we are at this step in the handshake
-	_, status := storage.getStateContact(aliceAddress)
-	//	if contact == waitingForAccept // it's possible that we've added them as well, ignore it
-	if status == contactAdded {
-		return nil, errors.New("ssyk: contact has already been added successfuly")
-	}
-
+func (e2e encryptionState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, []byte, []byte, error) {
 	// unserializekey
 	alicePubKey, err := hex.DecodeString(aliceAddress)
 	if err != nil {
-		return nil, errors.New("ssyk: contact's address is not hexadecimal")
+		return nil, nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
 	}
 	// needed by libdisco
 	alice := &disco.KeyPair{}
@@ -277,56 +226,32 @@ func (e2e encryptionState) acceptContact(aliceAddress, aliceName string, firstHa
 	// initialize handshake state
 	hs := disco.Initialize(disco.Noise_IK, false, prologue, e2e.keyPair, nil, alice, nil)
 	if _, _, err := hs.ReadMessage(firstHandshakeMessage, nil); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	// write the second handshake message
 	var msg []byte
 	ts2, ts1, err := hs.WriteMessage(nil, &msg) // reversed because we are the responder
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
-	// store the thread states + state
-	storage.addContact(aliceAddress, aliceName, nil)
-	storage.updateContact(aliceAddress, ts1.Serialize(), ts2.Serialize())
-
 	//
-	return msg, nil
+	return ts1.Serialize(), ts2.Serialize(), msg, nil
 }
 
 // finishHandshake parses the second (and final) Noise handshake message <- e, ee, se
-func (e2e encryptionState) finishAddContact(bobAddress string, secondHandshakeMessage []byte) error {
-	// check in storage if we are at this step in the handshake
-	serializedHandshakeState, status := storage.getStateContact(bobAddress)
-	if status == noContact {
-		return errors.New("ssyk: contact hasn't been added properly")
-	}
-	if status == contactAdded {
-		return errors.New("ssyk: contact has already been added successfuly")
-	}
-
+func (e2e encryptionState) finishAddContact(serializedHandshakeState, secondHandshakeMessage []byte) ([]byte, []byte, error) {
 	// unserialize handshake state
 	hs := disco.RecoverState(serializedHandshakeState, nil, e2e.keyPair)
-
-	// necessary for libdisco
-	bobPubKey, err := hex.DecodeString(bobAddress)
-	if err != nil {
-		return errors.New("ssyk: contact's address is not hexadecimal")
-	}
-	bob := &disco.KeyPair{}
-	copy(bob.PublicKey[:], bobPubKey)
 
 	// parse last message
 	var payload []byte
 	ts1, ts2, err := hs.ReadMessage(secondHandshakeMessage, &payload)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	// store the thread states + state
-	storage.updateContact(bobAddress, ts1.Serialize(), ts2.Serialize())
-
 	//
-	return nil
+	return ts1.Serialize(), ts2.Serialize(), nil
 }
