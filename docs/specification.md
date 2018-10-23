@@ -137,4 +137,69 @@ If the recipient is a new contact, he/she must first accept by completing the ha
 * send_message: send a message to someone
 * 
 
+# States
+
+## SasayakiState
+
+* initialized
+* mutex?
+* myAddress
+* encryptionState
+* storageState
+* hubState
+
+functions:
+
+* `initSasayakiState()`: this function does the following things:
+  - initEncryptionState(keyPair)
+  - initstorageState()
+  - sets initialized to true
+
+## EncryptionState
+
+e2e encryption
+
+* keyPair
+
+functions:
+
+* `initEncryptionState(keyPair)`:
+* encryptMessage()
+* decryptMessage()
+* createNewConvo()
+* createConvoFromMessage()
+* addContact()
+* acceptContact()
+* finishAddContact()
+
+## StorageState
+
+The Storage state is used to retrieve and update the local database. It is database agnostic, although the main implementation of Sasayaki (NCC Group Messenger) uses sqlite. It is supposed to transparently encrypt/decrypt rows from the database `decrypt(key=k, nonce=row.id, data=row.others, ad=table.name)` with `k = AD(passphrase)|BLIND(16)|OPRF()|UNBLIND`. It has the following values:
+
+* databaseAddress
+
+schema?
+
+functions:
+
+* `initStorageState(storageKey)`:
+* TKTK
+
+## HubState
+
+The HubState is used to communicate (using protobuffers) with the hub. This is the core spec which doesn't specify the protobuffers requests. Check the NCC Group Messenger spec for actual the protobuffers objects
+
+* hubAddress: the address of the hub
+* hubPublicKey: the public key of the hub
+* messagestoAck: an array of messages that the server can delete (do we really need this?)
+
+It responds to the following functions:
+
+* `InitHubState()`:
+* `sendMessage()`:
+* `getNextMessages(numberMessages)`: requests the next "numberMessages". 
+
+
+
+
 
