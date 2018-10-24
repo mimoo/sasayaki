@@ -165,6 +165,8 @@ func (hub *hubState) getNextMessage() (*s.ResponseMessage, error) {
 		return nil, err
 	}
 
+	// TODO: make sure that fields are set here?
+
 	// return message
 	return res, nil
 }

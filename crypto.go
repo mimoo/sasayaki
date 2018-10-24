@@ -123,13 +123,13 @@ func (e2e encryptionState) decryptMessage(strobeState []byte, encryptedMsg *s.Re
 }
 
 // createNewConvo returns the new threadState (after ratcheting) and the two session keys created for the thread
-func (e2e encryptionState) createNewConvo(threadState []byte, msg *plaintextMsg) (*s.Request_Message, []byte, []byte, []byte, error) {
+func (e2e encryptionState) createNewConvo(threadState []byte, msg *plaintextMsg) ([]byte, []byte, []byte) {
 	// recover state
-	threadState := strobe.RecoverState(threadState)
+	ts := strobe.RecoverState(threadState)
 
 	// create the session keys for the convo (following disco spec)
-	s1 := threadState.Clone()
-	s2 := threadState.Clone()
+	s1 := ts.Clone()
+	s2 := ts.Clone()
 
 	s1.AD(true, []byte("initiator"))
 	s1.RATCHET(32)
@@ -138,10 +138,9 @@ func (e2e encryptionState) createNewConvo(threadState []byte, msg *plaintextMsg)
 	s2.RATCHET(32)
 
 	// ratchet the thread state (following disco spec)
-	threadState.RATCHET(32)
-
-	// encrypt the title and return it
-	return e2e.encryptMessage(msg), threadState.Serialize(), s1.Serialize(), s2.Serialize(), nil
+	ts.RATCHET(32)
+	//
+	return ts.Serialize(), s1.Serialize(), s2.Serialize()
 }
 
 // from a threadState, create new session keys. Ratchets the state. returns all
@@ -180,19 +179,10 @@ func (e2e encryptionState) createConvoFromMessage(threadState []byte) ([]byte, [
 // addContact produces the first handshake message -> e, es, s, ss
 // note that if this has already been called, it cannot be called again
 // to re-add a contact, it must first be deleted
-func (e2e encryptionState) addContact(bobAddress, bobName string) ([]byte, []byte, error) {
+func (e2e encryptionState) addContact(bob *disco.KeyPair, bobName string) ([]byte, []byte, error) {
 	// TODO: prologue?
 	// idea: [addContact|myAddress|bobAddress]
 	prologue := []byte{}
-
-	// unserialize key
-	bobPubKey, err := hex.DecodeString(bobAddress)
-	if err != nil {
-		return nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
-	}
-	// needed by libdisco
-	bob := &disco.KeyPair{}
-	copy(bob.PublicKey[:], bobPubKey)
 
 	// Initialize Disco
 	hs := disco.Initialize(disco.Noise_IK, true, prologue, e2e.keyPair, nil, bob, nil)
@@ -210,15 +200,7 @@ func (e2e encryptionState) addContact(bobAddress, bobName string) ([]byte, []byt
 // acceptContact parses the first Noise handshake message -> e, es, s, ss
 // then produces the second (and final) Noise handshake message <- e, ee, se
 // this produces two strobe states that can be used to create threads between the two contacts
-func (e2e encryptionState) acceptContact(aliceAddress, aliceName string, firstHandshakeMessage []byte) ([]byte, []byte, []byte, error) {
-	// unserializekey
-	alicePubKey, err := hex.DecodeString(aliceAddress)
-	if err != nil {
-		return nil, nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
-	}
-	// needed by libdisco
-	alice := &disco.KeyPair{}
-	copy(alice.PublicKey[:], alicePubKey)
+func (e2e encryptionState) acceptContact(alice *disco.KeyPair, aliceName string, firstHandshakeMessage []byte) ([]byte, []byte, []byte, error) {
 
 	// TODO: prologue
 	prologue := []byte{}

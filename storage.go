@@ -13,14 +13,13 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"sync"
 )
 
-type databaseState struct {
+type storageState struct {
 	db *sql.DB
 }
 
-var storage databaseState
+var storage storageState
 
 // TODO: protect database with encryption under our passphrase
 func initStorageState() {
@@ -81,7 +80,7 @@ func initStorageState() {
 	// defer db.Close() // we never close the db
 }
 
-func (storage *databaseState) getMessages() {
+func (storage *storageState) getMessages() {
 	selectStatement := "SELECT * FROM conversations;"
 	_, err := storage.db.Exec(selectStatement)
 	if err != nil {
@@ -89,7 +88,7 @@ func (storage *databaseState) getMessages() {
 	}
 }
 
-func (storage *databaseState) getThreadRatchetStates(bobAddress string) ([]byte, []byte, error) {
+func (storage *storageState) getThreadRatchetStates(bobAddress string) ([]byte, []byte, error) {
 	// query
 	stmt, err := storage.db.Prepare("SELECT state, c1, c2 FROM contacts WHERE publickey = ?;")
 	if err != nil {
@@ -119,7 +118,7 @@ func (storage *databaseState) getThreadRatchetStates(bobAddress string) ([]byte,
 // getSessionKeys finds the session keys for chatting with Bob {convoId, BobAddress}
 //
 // if it doesn't find session keys for a  tuple
-func (storage *databaseState) getSessionKeys(convoId, bobAddress string) ([]byte, []byte, error) {
+func (storage *storageState) getSessionKeys(convoId, bobAddress string) ([]byte, []byte, error) {
 	stmt, err := storage.db.Prepare("SELECT c1, c2 FROM conversations WHERE id=? AND publickey=?;")
 	if err != nil {
 		panic(err)
@@ -140,8 +139,9 @@ func (storage *databaseState) getSessionKeys(convoId, bobAddress string) ([]byte
 	return c1, c2, nil
 }
 
+// TODO: this should also store the message
 // updateSessionKeys will crash if the database query doesn't work
-func (storage *databaseState) updateSessionKeys(convoId, bobAddress string, c1, c2 []byte) {
+func (storage *storageState) updateSessionKeys(convoId, bobAddress string, c1, c2 []byte) {
 	if c1 == nil && c2 == nil {
 		panic("ssyk: at least one session key must be defined in order to call updateSessionKeys")
 	}
@@ -162,7 +162,7 @@ func (storage *databaseState) updateSessionKeys(convoId, bobAddress string, c1, 
 	}
 }
 
-func (storage *databaseState) createConvo(convoId, bobAddress, title string, sessionkey1, sessionkey2 []byte) {
+func (storage *storageState) createConvo(convoId, bobAddress, title string, sessionkey1, sessionkey2 []byte) {
 	// (id TEXT, publickey TEXT, title TEXT, date_creation TIMESTAMP, date_last_message TIMESTAMP, c1 BLOB, c2 BLOB);
 	stmt, err := storage.db.Prepare("INSERT INTO conversations VALUES(?, ?, ?, DATETIME('now'), DATETIME('now'), ?, ?);")
 	if err != nil {
@@ -175,7 +175,7 @@ func (storage *databaseState) createConvo(convoId, bobAddress, title string, ses
 }
 
 // updateThreadRatchetStates takes two serialized thread states and update the bob's contact with them
-func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
+func (storage *storageState) updateThreadRatchetStates(bobAddress string, ts1, ts2 []byte) {
 	if ts1 == nil && ts2 == nil {
 		panic("ssyk: at least one session key must be defined in order to call updateSessionKeys")
 	}
@@ -197,7 +197,7 @@ func (storage *databaseState) updateThreadRatchetStates(bobAddress string, ts1, 
 }
 
 // TODO: do I need a pointervalue to be able to Lock/Unlock on the mutex?
-func (storage *databaseState) updateTitle(convoId, bobAddress, title string) {
+func (storage *storageState) updateTitle(convoId, bobAddress, title string) {
 	stmt, err := storage.db.Prepare("UPDATE conversations SET title=? WHERE id=? AND publickey=?;")
 	if err != nil {
 		panic(err)
@@ -209,7 +209,7 @@ func (storage *databaseState) updateTitle(convoId, bobAddress, title string) {
 	}
 }
 
-func (storage *databaseState) storeMessage(msg *plaintextMsg) uint64 {
+func (storage *storageState) storeMessage(msg *plaintextMsg) uint64 {
 	// who sent it?
 	senderIsMe := true
 	if msg.FromAddress != ssyk.myAddress {
@@ -229,7 +229,7 @@ func (storage *databaseState) storeMessage(msg *plaintextMsg) uint64 {
 	return uint64(id)
 }
 
-func (storage *databaseState) ConvoExist(convoId string) bool {
+func (storage *storageState) ConvoExist(convoId string) bool {
 	stmt, err := storage.db.Prepare("SELECT id FROM conversations WHERE id=? LIMIT 1;")
 	if err != nil {
 		panic(err)
@@ -252,7 +252,7 @@ const (
 
 // getStateContact returns nil if no contact has been added yet,
 // otherwise it returns the state (xxxxxx=waiting for answer, 1=all good)
-func (storage *databaseState) getStateContact(bobAddress string) ([]byte, contactState) {
+func (storage *storageState) getStateContact(bobAddress string) ([]byte, contactState) {
 	//
 	stmt, err := storage.db.Prepare("SELECT state FROM contacts WHERE publickey=?;")
 	if err != nil {
@@ -271,49 +271,46 @@ func (storage *databaseState) getStateContact(bobAddress string) ([]byte, contac
 		panic(err)
 	}
 
-// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
-// - [1|blob] : we received a contact request, blob is the received handshake message
-// - [2|empty] : we are done with the handshake, blob is empty
+	// - [0|blob] : we sent a contact request, blob is the serialized handshakeState
+	// - [1|blob] : we received a contact request, blob is the received handshake message
+	// - [2|empty] : we are done with the handshake, blob is empty
 	if state[0] == 0 {
 		return state[1:], waitingForAccept
 	} else if state[0] == 1 {
 		return state[1:], waitingToAccept
-	} 
+	}
 
 	return nil, contactAdded
 }
 
-// addContact is used when adding a contact for the very first time 
+// addContact is used when adding a contact for the very first time
 // (which is supposed to send a handshake message)
 // Note that `contacts.state` requires a bit more explanation. It contains either:
 // - [0|blob] : we sent a contact request, blob is the serialized handshakeState
 // - [1|blob] : we received a contact request, blob is the received handshake message
 // - [2|empty] : we are done with the handshake, blob is empty
-func (storage *databaseState) addContact(bobAddress, bobName string, serializedHandshakeState []byte) {
+func (storage *storageState) addContact(bobAddress, bobName string, serializedHandshakeState []byte) {
 	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
 	stmt, err := storage.db.Prepare("INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), ?, ?, NULL, NULL);")
 	if err != nil {
 		panic(err)
 	}
-	_, err = stmt.Exec(bobAddress, bobName, append([]byte{0, serializedHandshakeState...})
-	if err != nil {
+	if _, err = stmt.Exec(bobAddress, bobName, append([]byte{0}, serializedHandshakeState...)); err != nil {
 		panic(err)
 	}
 }
 
-// addContactFromReq is used to add a new contact entry from a received contact request 
+// addContactFromReq is used to add a new contact entry from a received contact request
 // this function assumes that there is not already a contact for this entry
-func (storage *databaseState) addContactFromReq(aliceAddress string, firstHandshakeMessage []byte) {
-	// 
+func (storage *storageState) addContactFromReq(aliceAddress string, firstHandshakeMessage []byte) {
+	//
 	stmt, err := storage.db.Prepare("INSERT INTO contacts VALUES(NULL, ?, DATETIME('now'), NULL, ?, NULL, NULL);")
 	if err != nil {
 		panic(err)
 	}
-	_, err = stmt.Exec(aliceAddress, append([]byte{1, firstHandshakeMessage...})
-	if err != nil {
+	if _, err = stmt.Exec(aliceAddress, append([]byte{1}, firstHandshakeMessage...)); err != nil {
 		panic(err)
 	}
-
 
 }
 
@@ -322,7 +319,7 @@ func (storage *databaseState) addContactFromReq(aliceAddress string, firstHandsh
 // - [0|blob] : we sent a contact request, blob is the serialized handshakeState
 // - [1|blob] : we received a contact request, blob is the received handshake message
 // - [2|empty] : we are done with the handshake, blob is empty
-func (storage *databaseState) finalizeContact(bobAddress, ts1, ts2 []byte) error {
+func (storage *storageState) finalizeContact(bobAddress, ts1, ts2 []byte) error {
 	// contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, publickey TEXT, date TIMESTAMP, name TEXT, state BLOB, c1 BLOB, c2 BLOB);
 	stmt, err = storage.db.Prepare("UPDATE contacts SET state=?, c1=?, c2=? WHERE publickey=?;")
 	if err != nil {
@@ -363,7 +360,7 @@ func updateContactName(bobAddress, bobName string) error {
 	return nil
 }
 
-func (storage *databaseState) deleteContact(bobAddress string) error {
+func (storage *storageState) deleteContact(bobAddress string) error {
 	stmt, err = storage.db.Prepare("DELETE FROM contacts WHERE publickey=?;")
 	if err != nil {
 		panic(err)

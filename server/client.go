@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -137,10 +138,14 @@ func success(success bool, message string) ([]byte, error) {
 // handleSendMessage attempts to send the message. Returns an error if it doesn't work
 // because of conn. Otherwise send a failure proto message
 func (cc client) handleSendMessage(req *s.Request) ([]byte, error) {
+	message := req.GetMessage()
+	if message == nil {
+		return nil, errors.New("ssyk: received empty protobuf message")
+	}
 	// parse request
-	convoId := req.Message.GetConvoId()
-	toAddress := req.Message.GetToAddress()
-	content := req.Message.GetContent()
+	convoId := message.GetConvoId()
+	toAddress := message.GetToAddress()
+	content := message.GetContent()
 	// checking fields
 	// TODO: test if id or convo id = 0 ? (not set)
 	if len(toAddress) != 64 || content == nil || len(content) > messageMaxChars || len(convoId) != 32 {

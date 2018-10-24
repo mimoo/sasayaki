@@ -168,7 +168,7 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 			return nil, err
 		}
 		// create new convo
-		encryptedMessage, threadState, s1, s2, err := e2e.createNewConvo(t1, msg)
+		threadState, s1, s2, err := e2e.createNewConvo(t1, msg)
 		if err != nil {
 			return "", err
 		}
@@ -176,23 +176,36 @@ func (ss sasayakiState) sendMessage(msg *plaintextMsg) (string, error) {
 		storage.updateThreadRatchetStates(msg.ToAddress, threadState, nil)
 		// create the conversation with the current thread ratchet value and a random convoId
 		storage.createConvo(msg.ConvoId, msg.ToAddress, msg.Content, s1, s2)
+
+		// encrypt the title and return it
+		encryptedMessage, s1, err := e2e.encryptMessage(s1, msg)
+		if err != nil {
+			return "", err
+		}
+		// store message
+
+		// update strobeState // TODO: this should store msg as well
+		storage.updateSessionKeys(msg.ConvoId, msg.ToAddress, s1, nil)
+		panic("todo")
+
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
 			return "", err
 		}
 	} else { // nope, it's just a message
 		// get strobeState
-		c1, _, err := storage.getSessionKeys(msg.ConvoId, msg.ToAddress)
+		s1, _, err := storage.getSessionKeys(msg.ConvoId, msg.ToAddress)
 		if err != nil {
 			return nil, err
 		}
 		// add encryption
-		encryptedMessage, strobeState, err := e2e.encryptMessage(c1, msg)
+		encryptedMessage, strobeState, err := e2e.encryptMessage(s1, msg)
 		if err != nil {
 			return "", err
 		}
-		// update strobeState
+		// update strobeState		// TODO: this should store the message as well
 		storage.updateSessionKeys(msg.ConvoId, msg.ToAddress, strobeState, nil)
+		panic("todo")
 		// send to hub
 		if err := hub.sendMessage(encryptedMessage); err != nil {
 			return "", err
@@ -222,8 +235,18 @@ func (ss sasayakiState) aliceAddContact(bobAddress, bobName string) error {
 		return nil, errors.New("ssyk: contact has already been added")
 	}
 
-	// get the first handshake message
-	firstHandshakeMessage, serializedHandshakeState, err := e2e.addContact(bobAddress, bobName)
+	// unserialize key
+	bobPubKey, err := hex.DecodeString(bobAddress)
+	if err != nil {
+		return nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
+	}
+
+	// needed by libdisco
+	bob := &disco.KeyPair{}
+	copy(bob.PublicKey[:], bobPubKey)
+
+	// get first handshake message
+	firstHandshakeMessage, serializedHandshakeState, err := e2e.addContact(bob, bobName)
 	if err != nil {
 		return err
 	}
@@ -281,9 +304,16 @@ func (ss sasayakiState) bobAcceptContact(aliceAddress, aliceName string) error {
 	if status != waitingToAccept {
 		return nil, errors.New("ssyk: contact is not being added properly")
 	}
-
+	// unserializekey
+	alicePubKey, err := hex.DecodeString(aliceAddress)
+	if err != nil {
+		return nil, nil, nil, errors.New("ssyk: contact's address is not hexadecimal")
+	}
+	// needed by libdisco
+	alice := &disco.KeyPair{}
+	copy(alice.PublicKey[:], alicePubKey)
 	// parse handshake message and continue handshake
-	ts1, ts2, secondHandshakeMsg, err := e2e.acceptContact(aliceAddress, aliceName, firstHandshakeMessage)
+	ts1, ts2, secondHandshakeMsg, err := e2e.acceptContact(alice, aliceName, firstHandshakeMessage)
 	if err != nil {
 		return err
 	}
