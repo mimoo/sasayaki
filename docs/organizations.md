@@ -24,3 +24,8 @@ example:
 - actually, having suborganizations is not going to be flexible, what if people move around?
 - better might be to just have the organization organize users as it wishes (but this becomes a threat?)
 - they can publish a change of user's sub-organization in the gossip merkle tree?
+
+# multiple organizations
+
+* actually, maybe different offices should be different organization
+* your main office is your main source of trust -> it can sign and revoke other organizations

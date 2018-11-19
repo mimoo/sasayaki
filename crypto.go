@@ -69,9 +69,11 @@ func (e2e encryptionState) encryptMessage(strobeState []byte, msg *plaintextMsg)
 	if err != nil {
 		return nil, nil, err
 	}
+	// TODO: authenticate the date so that server cannot re-order
 	copy(toAuthenticate[0:16], convoId)
 	copy(toAuthenticate[16:16+32], e2e.keyPair.PublicKey[:])
 	copy(toAuthenticate[16+32:16+32+32], bobPubKey)
+	// TODO: use disco.symmetric encrypt with nonce-based (so no need to update the state after)
 	// encrypt message
 	ciphertext := s1.Send_AEAD([]byte(msg.Content), toAuthenticate)
 	// create return value
@@ -131,10 +133,10 @@ func (e2e encryptionState) createNewConvo(threadState []byte, msg *plaintextMsg)
 	s1 := ts.Clone()
 	s2 := ts.Clone()
 
-	s1.AD(true, []byte("initiator"))
+	s1.AD(true, []byte("initiatorThread"))
 	s1.RATCHET(32)
 
-	s2.AD(true, []byte("responder"))
+	s2.AD(true, []byte("responderThread"))
 	s2.RATCHET(32)
 
 	// ratchet the thread state (following disco spec)
@@ -152,10 +154,10 @@ func (e2e encryptionState) createConvoFromMessage(threadState []byte) ([]byte, [
 	s1 := ts.Clone()
 	s2 := ts.Clone()
 
-	s1.AD(true, []byte("initiator"))
+	s1.AD(true, []byte("initiatorThread"))
 	s1.RATCHET(32)
 
-	s2.AD(true, []byte("responder"))
+	s2.AD(true, []byte("responderThread"))
 	s2.RATCHET(32)
 
 	// ratchet the thread state (following disco spec)

@@ -1,6 +1,8 @@
 # Threat Model and Rational
 
-Sasayaki adopts the Internet threat model [RFC 3552](https://tools.ietf.org/html/rfc3552) and therefore assumes that the attacker has complete control over the network.
+(Sasayaki adopts the Internet threat model [RFC 3552](https://tools.ietf.org/html/rfc3552) and therefore assumes that the attacker has complete control over the network.) -> maybe not
+
+Sasayaki adopts the [honest by curious](https://crypto.stanford.edu/pbc/notes/crypto/sfe.html) threat model, where a hub reliably delivers messages in order, but still might try to spy on users.
 
 Sasayaki or NCC Group Messenger was designed as an end-to-end encrypted messaging application for a specific work environement (NCC Group):
 
@@ -19,3 +21,5 @@ Sasayaki or NCC Group Messenger was designed as an end-to-end encrypted messagin
 * if we have notice of receipt, we won't tie any security to it (too many messages)
 
 overall: the goal is to achieve something better than PGP email encryption inside of a company. Not to achieve maximum paranoid settings which are mostly useless
+
+* two types of secrets: the keys and the data
